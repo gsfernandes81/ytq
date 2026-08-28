@@ -1979,7 +1979,9 @@ def to_clipboard(text: str) -> str:
     """
     tool = shutil.which("termux-clipboard-set")
     if not tool:
-        return "no termux-clipboard-set - pkg install termux-api"
+        # Fits a 38-column flash whole: the fix IS the message, and a command
+        # clipped at the edge of a phone is a command retyped wrong.
+        return "no clipboard - pkg install termux-api"
     try:
         done = subprocess.run(
             [tool], input=text, text=True, capture_output=True, timeout=10
@@ -1987,7 +1989,7 @@ def to_clipboard(text: str) -> str:
     except (OSError, subprocess.TimeoutExpired) as exc:
         return f"clipboard failed: {exc}"
     if done.returncode != 0:
-        return "clipboard failed - is the Termux:API app installed?"
+        return "clipboard failed - Termux:API app?"
     return "copied: " + text
 
 
@@ -3527,6 +3529,23 @@ def _self_test() -> int:
           "avc1.42 + mp4a")
     check("audio-only says its one codec", by_fmt["251"].codecs, "opus")
     check("an unknown codec is not dressed up", by_fmt["direct"].codecs, "- + -")
+    # The clipboard's two fixed answers flash on a 40-column screen with a
+    # column of margin each side; a clipped fix-command is the failure the
+    # first harness run actually caught. Driven through the real function
+    # with the tool hidden, not by retyping the strings here.
+    real_which = shutil.which
+    try:
+        shutil.which = lambda name: None
+        missing = to_clipboard("https://x")
+    finally:
+        shutil.which = real_which
+    check("no clipboard tool names the fix", "pkg install termux-api" in missing, True)
+    at_most("and the fix fits the flash whole", len(missing), 38)
+    at_most(
+        "as does the failed-run answer",
+        len("clipboard failed - Termux:API app?"),
+        38,
+    )
     check("largest video first", options[0].fmt, "137+140")
     check(
         "audio-only sorts below video",
