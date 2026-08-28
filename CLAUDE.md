@@ -58,12 +58,12 @@ Decisions that travel with this code:
   a hint clipped at the floor is usually the way out that got clipped.
 - **`ytq.write_item` is the one door and refuses duplicates**
   (`ytq.Duplicate`), keyed on extractor and id rather than URL; the search,
-  a pasted URL, `--now`, `--from-json` and `dlqd dlq` all end there. The
+  a pasted URL, `--now`, `--from-json` and `dlq` all end there. The
   results list marks what the queue already holds — before the probe is
   spent.
 - **`next_number` caps at `MAX_PRIORITY`** — the runner sorts file names, so
   a third digit puts an item at the front, not the back.
-- **Downloading now spawns a detached `dlqd now`** (by path under the queue
+- **Downloading now spawns a detached `dlq now`** (by path under the queue
   root: `HERE / "expire_sched.py"`), so ytq stays open and the download
   outlives the screen.
 - **`Choice.kind` decides an item's destination** — never the file extension

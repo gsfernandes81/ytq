@@ -6,7 +6,7 @@ only** (~0.1–0.5 MB, no media), shows every format with the size yt-dlp states
 for it, and writes a queue item with that measured size as its spending cap.
 The video itself downloads during the nightly window and appears in your video
 download directory — on the phone that is Android's Downloads until you point
-it somewhere else with `dlqd dest video <dir>`.
+it somewhere else with `dlq dest video <dir>`.
 
 ## Use
 
@@ -80,10 +80,10 @@ queued 50-some-talk.py — 487 MiB (1080p mp4), cap 506 MiB
 
 The download then runs on the next night(s) with allowance to spare, and the
 finished file appears in the video download directory as `some-talk.mp4`.
-`dlqd list` shows progress and `dlqd path some-talk` says where it went.
+`dlq list` shows progress and `dlq path some-talk` says where it went.
 
 ```
-dlqd dest video ~/storage/movies   # change it for everything
+dlq dest video ~/storage/movies   # change it for everything
 ytq --dest ~/storage/dcim <url>    # or for this one only
 ```
 
@@ -256,8 +256,8 @@ you stopped. Leaving `ytq` leaves the download running.
 
 Only one at a time: the queue takes an exclusive lock, so asking for a second
 while one is going says so and leaves the second queued. It still writes the
-queue item first either way, so it shows up in `dlqd list`, and
-`dlqd path <name>` says where it landed.
+queue item first either way, so it shows up in `dlq list`, and
+`dlq path <name>` says where it landed.
 
 ## When YouTube says "Sign in to confirm you're not a bot"
 

@@ -42,11 +42,11 @@ The item it writes runs yt-dlp per firing (see :mod:`ytdl_item`); it never
 resolves a media URL up front, because those are signed and expire in hours,
 which is shorter than the queue takes to work through a large video.
 
-Downloading now still writes that item first and then asks ``dlqd`` to run it,
+Downloading now still writes that item first and then asks ``dlq`` to run it,
 rather than waiting for the window. Downloading without the queue would have
 been less code and worse: this way an interrupted download resumes instead of
 restarting, the nightly window finishes anything that stops early, and
-``dlqd list`` knows about it like everything else. It is mobile data spent now,
+``dlq list`` knows about it like everything else. It is mobile data spent now,
 though, which the nightly window is not.
 
 That run is handed to a detached process rather than held in the foreground, so
@@ -161,7 +161,7 @@ ITEM_RE = re.compile(r"^(\d{2,})-")
 #: so ``100`` sorts before ``20`` and an item numbered past 99 does not go to
 #: the back of the queue, it goes to the front. Zero-padded to two, string
 #: order and number order are the same thing, and every screen that talks about
-#: "lower runs first" is telling the truth. ``dlqd ui``'s reorder hands out
+#: "lower runs first" is telling the truth. ``dlq ui``'s reorder hands out
 #: fresh two-digit keys when the room between two items runs out, which is also
 #: what repairs a queue that already has three-digit ones in it.
 MAX_PRIORITY = 99
@@ -1463,7 +1463,7 @@ def next_number() -> int:
     otherwise be ``100``, which sorts *before* ``20``: a new download would go
     to the head of the queue rather than the tail, and the only symptom would
     be things running in the wrong order. At the cap new items share the last
-    key and are ordered by their slugs; ``dlqd ui``'s reorder is what spreads
+    key and are ordered by their slugs; ``dlq ui``'s reorder is what spreads
     them out again.
     """
     highest = 0
@@ -1658,7 +1658,7 @@ def queue_busy() -> bool:
 def now_argv(name: str) -> list[str]:
     """The command that downloads one queued item now.
 
-    ``dlqd``'s own action, by path under the queue root rather than by console
+    ``dlq``'s own action, by path under the queue root rather than by console
     script, for the reason :func:`_root` exists: an installed copy in
     site-packages manages a queue that is not there. ``--yes`` because the
     confirm screen was the asking, and being asked twice teaches people to stop
@@ -2380,7 +2380,7 @@ def confirm(
                 curses.A_BOLD | cost,
             )
             note = (
-                "starts on enter and runs in the background; dlqd list "
+                "starts on enter and runs in the background; dlq list "
                 "shows it, x stops it"
             )
             for offset, piece in enumerate(wrapped(note, max(20, width - 4))):
@@ -2800,7 +2800,7 @@ def watch(win, paint: dict, running: Running) -> None:
                 win,
                 2,
                 2,
-                "no longer running — dlqd list says how it went"
+                "no longer running — dlq list says how it went"
                 if width >= WIDE
                 else "no longer running",
                 curses.A_BOLD,
@@ -3205,7 +3205,7 @@ def _start_or_say_why(win, running: Running, path: Path, choice: Choice) -> str 
     running.start(path.name)
     return (
         f"downloading {path.name} now — {human(choice.size)} "
-        f"({choice.label}); dlqd list shows it"
+        f"({choice.label}); dlq list shows it"
     )
 
 
@@ -3233,7 +3233,7 @@ def list_results(hits: list[Result], width: int) -> int:
 def list_feed(count: int = SUBS_RESULTS) -> int:
     """The subscription feed, printed. The same rows, without a terminal.
 
-    Here for the same reason ``dlqd``'s read-only screens are: this is the one
+    Here for the same reason ``dlq``'s read-only screens are: this is the one
     thing on the feed side that something with no terminal can still ask for —
     a pipe, a script, an ssh session with no tty — and the alternative is that
     the only way to see the feed at all is a curses app.
@@ -3242,7 +3242,7 @@ def list_feed(count: int = SUBS_RESULTS) -> int:
         """The same words the screen uses, one to a line, on stderr.
 
         The verdict first and prefixed, the working under it, which is the
-        shape ``dlqd status`` prints in — and the reason it is not one long
+        shape ``dlq status`` prints in — and the reason it is not one long
         line is that these end in a path somebody has to read.
         """
         head, *rest = lines
@@ -4235,11 +4235,11 @@ def _self_test() -> int:
 
     # -- the background download -------------------------------------------- #
 
-    # It runs dlqd's own action, by path under the queue root: a console script
+    # It runs dlq's own action, by path under the queue root: a console script
     # would be the copy in site-packages, which manages a queue that is not
     # there. --yes because the confirm screen was the asking.
     spawn = now_argv("60-clip.py")
-    check("a now-run is dlqd's own action", spawn[2:], ["now", "60-clip.py", "--yes"])
+    check("a now-run is dlq's own action", spawn[2:], ["now", "60-clip.py", "--yes"])
     check(
         "a now-run points at the queue root, not at an installed copy",
         spawn[1],
@@ -4484,7 +4484,7 @@ def main(argv: list[str] | None = None) -> int:
               ytq --list --from-json F  reprint a saved dump; costs no data
 
             plain file URLs queue with dlq instead; the queue itself is
-            dlqd — bare for the screen, or dlqd (status|list|arm|logs).
+            dlq — bare for the screen, or dlq (status|list|arm|logs).
             docs: ~/ytq/docs/ytq.md and ~/dlq/docs/download-queue.md"""),
     )
     parser.add_argument(
@@ -4514,7 +4514,7 @@ def main(argv: list[str] | None = None) -> int:
         "--dest",
         metavar="DIR",
         help="put this one somewhere other than the configured video or audio "
-        "directory (dlqd dest sets those)",
+        "directory (dlq dest sets those)",
     )
     parser.add_argument(
         "--from-json",
@@ -4574,7 +4574,7 @@ def main(argv: list[str] | None = None) -> int:
     dest = str(Path(args.dest).expanduser()) if args.dest else "video"
     # A list, because a session can queue several items now. The download-now
     # case is already running by the time this returns: it was handed to a
-    # detached `dlqd now`, so there is nothing left here to wait for.
+    # detached `dlq now`, so there is nothing left here to wait for.
     receipts = curses.wrapper(app, first or None, preloaded, args.now, dest)
     if not receipts:
         print("nothing queued")
