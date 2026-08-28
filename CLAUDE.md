@@ -89,6 +89,17 @@ Decisions that travel with this code:
   momentum. And the deeper look completes the ↓ that asked for it —
   `bumped_place` steps the cursor onto the first new row once the longer
   listing lands.
+- **A run with no stop time must never be formatted with `int()`**
+  (2026-08-28, and it had been broken since long before the split). `dlq
+  now` and `run-now --blind` both set `EXPIRE_STOP_EPOCH=0` on purpose —
+  they are deliberately outside the window — and `expire_dl.Env.deadline`
+  spells that `+inf`. Every *comparison* against it is right; the banner's
+  `int(deadline - time.time())` was not, and `int(inf)` raises. So `n` on a
+  video died before a byte moved, in the line that says what it is about to
+  do, leaving `unhandled error: OverflowError` in a log nobody opens — while
+  file downloads through `expire_dl` worked, because that module only ever
+  compares. `time_left()` is the one place that phrase is built now, and it
+  says "no stop time" in words.
 
 ## Checks
 

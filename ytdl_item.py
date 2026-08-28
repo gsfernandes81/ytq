@@ -114,6 +114,25 @@ RATE_FLOOR = 2 * 1024 * 1024
 #: network work outstanding.
 STOP_LEAD = 30
 
+def time_left(deadline: float, now: float | None = None) -> str:
+    """The banner's "how long have I got" phrase, safe on an endless run.
+
+    ``dlq now`` sets ``EXPIRE_STOP_EPOCH=0`` on purpose — a download asked
+    for outside the window has no stop time — and
+    :meth:`expire_dl.Env.deadline` spells that ``+inf``. Every *comparison*
+    against it is correct (nothing is ever past an infinite deadline), but
+    the banner formatted it with ``int()``, and ``int(inf)`` raises
+    OverflowError. That crashed the run in the line that says what the run
+    is about to do: before a byte moved, with "unhandled error" in a log
+    nobody opens and `n` simply not working.
+
+    So the phrase is a function, and an endless run says so in words.
+    """
+    if deadline == float("inf"):
+        return "no stop time"
+    return f"{int(deadline - (time.time() if now is None else now))}s of it"
+
+
 #: Keep the stop this far inside the slice. Small, because the predictive stop
 #: below is what actually absorbs the overshoot; this only covers error in the
 #: prediction. Both were sized generously at first, and together they gave away
@@ -573,7 +592,7 @@ def fetch(
     rate_limit = max(RATE_FLOOR, ceiling // RATE_DIVISOR)
     log(
         f"yt-dlp -f {fmt}  slice {budget:,} B (stopping at {ceiling:,} B), "
-        f"{int(deadline - time.time())}s of it, {have:,} B already on disk, "
+        f"{time_left(deadline)}, {have:,} B already on disk, "
         f"rate capped at {rate_limit:,} B/s"
     )
 
@@ -731,6 +750,16 @@ def _self_test() -> int:
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("wb") as handle:
             handle.truncate(size)
+
+    # `dlq now` runs with no stop time, which expire_dl spells +inf. The
+    # banner used to int() that and raise OverflowError before a byte moved,
+    # so a video asked for with `n` failed every time with nothing on screen
+    # to say why. Both cases are pinned: the endless run says so in words,
+    # and an ordinary firing still counts its seconds.
+    check("an endless run has no seconds to print", time_left(float("inf")), "no stop time")
+    check("a real deadline still counts down", time_left(1_000.0, now=940.0), "60s of it")
+    check("and a deadline already past reads negative, not crashed",
+          time_left(900.0, now=940.0), "-40s of it")
 
     with tempfile.TemporaryDirectory() as raw:
         root = Path(raw)
