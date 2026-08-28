@@ -23,14 +23,14 @@ is: env override first, then a clone beside this repo, then `~/<name>`.
 Install (optional — `python3 ~/ytq/ytq.py` works as-is):
 
 ```
-uv tool install --offline --editable ~/ytq
+uv tool install --editable ~/ytq
 ln -s ~/ytq/completions/ytq.fish ~/.config/fish/completions/
 ```
 
 ## Checks
 
 `make dev` (`uv sync`, once, networked) puts the locked pytest into `.venv`;
-then `make test` (`uv run --offline pytest`) or `make check` — the same
+then `make test` (`uv run pytest`) or `make check` — the same
 self-tests;
 `.githooks/checks.sh` is the one copy and the pre-push hook
 (`git config core.hooksPath .githooks`) refuses a push that fails them.
