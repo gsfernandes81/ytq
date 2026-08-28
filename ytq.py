@@ -190,14 +190,14 @@ HINTS = {
     # by retyping it, so `/` earns its place there; the feed has nothing to
     # retype and what it needs instead is a way to read it again.
     # ↑↓ is dropped from these two and nowhere else: it is the most guessable
-    # key on a list and `m` is the one whose absence costs somebody the videos
-    # they came here for.
+    # key on a list and `↓ more` is the one whose absence costs somebody the
+    # videos they came here for.
     "subs": "⏎ quality  ↓ more  r fresh  q back",
     "subs-running": "x stop  ⏎ quality  ↓ more  q back",
-    # And the same two with `m` spent. A key drawn in the hints that does
-    # nothing when pressed is the shape somebody presses three times before
-    # deciding the tool is broken — and this one used to look like the way to
-    # the older videos it can no longer reach.
+    # And the same two with the deeper look spent. A key drawn in the hints
+    # that does nothing when pressed is the shape somebody presses three times
+    # before deciding the tool is broken — and this one used to look like the
+    # way to the older videos it can no longer reach.
     "subs-end": "⏎ quality  r fresh  q back",
     "subs-end-running": "x stop  ⏎ quality  q back",
     "pick": "↑↓ pick  ⏎ queue  n now  q back  ~ est",
@@ -299,7 +299,7 @@ SUBS_URL = "https://www.youtube.com/feed/subscriptions"
 #: bound and not a preference — see :func:`subs_argv`.
 SUBS_RESULTS = 30
 
-#: What ``m`` adds to that bound, and where it stops. The cap is not a
+#: What a deeper look adds to that bound, and where it stops. The cap is not a
 #: technical limit: it is there because every press costs more than the last
 #: (see :func:`feed_cost`) and a list you can keep extending with one thumb is
 #: a list somebody extends five times without meaning to.
@@ -798,9 +798,11 @@ def bumped_place(place: tuple[int, int], count: int) -> tuple[int, int]:
 
     ↓ at the last row is what asked for it, and that key's motion completes
     when the fetch does: one row on, onto the first video that just arrived.
-    Asked from anywhere else (the unhinted `m` alias mid-list), the place
-    stays put. Overshoot is :func:`viewport`'s to clamp, so a feed that came
-    back no longer than it was leaves the cursor on the last row it had.
+    Asked from anywhere else the place stays put. No key asks from mid-list
+    any more — the `m` alias that did was removed — but a listing that came
+    back shorter than the row that asked for it is the same shape and lands
+    here. Overshoot is :func:`viewport`'s to clamp, so a feed that came back
+    no longer than it was leaves the cursor on the last row it had.
     """
     row, top = place
     if count and row == count - 1:
@@ -814,7 +816,7 @@ def next_page(got: int, asked: int) -> tuple[int | None, bool]:
     ``(None, False)`` is the end of the feed: YouTube handed back fewer than
     it was asked for, so there is nothing further back to reach and asking
     again would buy the same bytes to learn the same thing. That is the case
-    worth getting right — a ``m`` that stays live at the bottom of the feed
+    worth getting right — a ``↓`` that stays live at the bottom of the feed
     spends real quota on nothing, every press, and looks exactly like one that
     is working.
 
@@ -2764,7 +2766,8 @@ def results(
     place: tuple[int, int] = (0, 0),
 ) -> tuple[int | str | None, tuple[int, int]]:
     """A list of videos, and where it was left. An index, ``"/"``, ``"r"`` or
-    ``"m"``, or ``None`` to go back — paired with the place to hand back in.
+    ``"more"``, or ``None`` to go back — paired with the place to hand back
+    in.
 
     Below :data:`WIDE` each result takes two lines, so ten of them are ten
     titles a thumb can read rather than twenty truncated columns. The cursor
@@ -2788,13 +2791,13 @@ def results(
 
     *place* is handed back with the answer rather than kept here, because
     every way out of this screen comes back to it: queueing a video redraws
-    the list, and ``m`` and ``r`` fetch and redraw it. Starting at the top
-    each time turned "find three things to download in one search" — which is
-    what this screen is *for* — into three scrolls back to where you were, and
-    made ``m`` useless past the first page.
+    the list, and a deeper look and ``r`` fetch and redraw it. Starting at the
+    top each time turned "find three things to download in one search" — which
+    is what this screen is *for* — into three scrolls back to where you were,
+    and made the deeper look useless past the first page.
 
     ``←`` and ``→`` jump a screenful, the same as page up and page down and
-    for the same reason those are here: with ``m`` the list runs to
+    for the same reason those are here: a feed read deeply runs to
     :data:`SUBS_MAX`, and on a phone the page keys are two taps into an
     extra-keys row that the arrows are already on. Neither pair is in the
     hints — there is no room at 38 columns and less at 30 — so both are in
@@ -2822,9 +2825,9 @@ def results(
             curses.A_REVERSE | curses.A_BOLD | paint.get("head", 0),
         )
         if feed:
-            # What `m` costs stands on the screen before it is pressed, which
-            # is the entry screen's rule applied to the one key here that
-            # spends.
+            # What the deeper look costs stands on the screen before ↓ is
+            # pressed, which is the entry screen's rule applied to the one key
+            # here that spends.
             meta = feed_meta(
                 len(hits), freshness(fetched), more, at_cap, width
             )
@@ -2856,7 +2859,7 @@ def results(
         if narrow:
             if feed:
                 # `-end` when there is nothing further back to buy, so the
-                # hints and the meta line agree about whether `m` is a key.
+                # hints and the meta line agree about whether ↓ buys more.
                 name = "subs" if more else "subs-end"
                 name += "-running" if running.alive else ""
             else:
@@ -2866,7 +2869,7 @@ def results(
             keys = "↑↓ choose   enter see the formats"
             if feed:
                 if more:
-                    keys += f"   m {more - len(hits)} more"
+                    keys += f"   ↓ {more - len(hits)} more"
                 keys += "   r read it again"
             else:
                 keys += "   / search again"
@@ -2909,26 +2912,19 @@ def results(
         # feed's own hint carries it and the search's does not.
         if feed and key == ord("r"):
             return "r", here
-        # Guarded on there actually being more, so that at the bottom of the
-        # feed this is a key that does nothing rather than one that buys the
-        # same listing again — and the meta line above says which it is.
-        # The hinted key is ↓ at the bottom of the list (below); m stays for
-        # the fingers that learned it, unhinted.
-        if feed and more and key == ord("m"):
-            return "m", here
         if key == ord("x"):
             running.stop()
         elif key in (curses.KEY_UP, ord("k")):
             cursor -= 1
         elif key in (curses.KEY_DOWN, ord("j")):
             # On the feed, down at the last row keeps going: it fetches the
-            # next page instead of stopping dead (2026-08-28, replacing `m`
-            # in the hints). The consent rule holds — the meta line above has
-            # been saying what the deeper look costs since before this key
+            # next page instead of stopping dead (2026-08-28, taking it over
+            # from `m`, since removed). The consent rule holds — the meta
+            # line above has been saying what it costs since before this key
             # was pressed — and at the end of the feed or the cap `more` is
             # None, so this is the same key doing nothing at the same floor.
             if feed and more and hits and cursor == len(hits) - 1:
-                return "m", here
+                return "more", here
             cursor += 1
         elif key == curses.KEY_MOUSE:
             # A flick, not a keypress: the wheel moves the cursor and stops
@@ -2936,9 +2932,10 @@ def results(
             # bottom — ↓ is a decision and a flick is momentum, and only a
             # decision may spend data.
             cursor += read_wheel()
-        # The arrows alias the page keys rather than replacing them: `m` can
-        # make this list five times longer than it was, and on a phone the
-        # page keys are two taps into an extra-keys row the arrows sit on.
+        # The arrows alias the page keys rather than replacing them: a deeper
+        # look can make this list five times longer than it was, and on a
+        # phone the page keys are two taps into an extra-keys row the arrows
+        # sit on.
         elif key in (curses.KEY_NPAGE, curses.KEY_RIGHT):
             cursor += listed
         elif key in (curses.KEY_PPAGE, curses.KEY_LEFT):
@@ -3058,18 +3055,20 @@ def app(
     #: rather than dropping the cache entry, so a look that does not come back
     #: leaves the listing that was on screen still on screen.
     refetch = False
-    #: How deep the feed has been asked for, which ``m`` raises a page at a
-    #: time. Kept here rather than derived from ``len(hits)``: a feed that
-    #: handed back 28 of the 30 asked for has been asked for 30, and it is the
-    #: gap between those two numbers that says there is no more to come.
+    #: How deep the feed has been asked for, which ↓ at the last row raises a
+    #: page at a time. Kept here rather than derived from ``len(hits)``: a
+    #: feed that handed back 28 of the 30 asked for has been asked for 30, and
+    #: it is the gap between those two numbers that says there is no more to
+    #: come.
     #:
     #: Two of them, and that is the point: ``subs_want`` is what the next
     #: fetch will ask for and ``subs_asked`` is what the listing on screen was
     #: actually answered at. One variable said the deeper number the moment
-    #: ``m`` was pressed, so a deeper fetch that FAILED left thirty videos on
+    #: ↓ was pressed, so a deeper fetch that FAILED left thirty videos on
     #: screen beside a claim that sixty had been asked for — which
     #: :func:`next_page` reads as the end of the feed, and the screen then
-    #: says "the whole feed" over a third of it with `m` switched off.
+    #: says "the whole feed" over a third of it with the deeper look switched
+    #: off.
     subs_asked = subs_want = SUBS_RESULTS
 
     # A saved dump stands in for whichever call would have fetched it, so both
@@ -3201,7 +3200,7 @@ def app(
                 typed, screen = "", "entry"
             elif picked == "r":
                 refetch, screen = True, "subs"
-            elif picked == "m":
+            elif picked == "more":
                 # The whole listing is bought again, not the extra thirty —
                 # `feed_cost` is the total for that reason, and the screen
                 # that offered this key said the total.
@@ -4039,7 +4038,7 @@ def _self_test() -> int:
           subs_argv(90)[subs_argv(90).index("--playlist-end") + 1], "90")
 
     # The end of the feed is the case that costs real quota to get wrong: an
-    # `m` still live at the bottom buys the same listing again on every press
+    # a ↓ still live at the bottom buys the same listing again on every press
     # and looks exactly like one that is working.
     check("a short answer is the end of the feed", next_page(28, 30), (None, False))
     check("a full answer means there is more", next_page(30, 30), (60, False))
@@ -4081,7 +4080,7 @@ def _self_test() -> int:
                     True,
                 )
     check("the wide meta spells the price out", "for ~0.4 MB" in feed_meta(30, "just now", 60, False, 80), True)
-    # The hints and the meta have to agree about whether `m` is a key: one of
+    # The hints and the meta have to agree about whether ↓ buys more: one of
     # them saying "more" while the other says "the whole feed" is the state
     # that gets pressed three times.
     for name in ("subs", "subs-running", "subs-end", "subs-end-running"):
@@ -4095,14 +4094,15 @@ def _self_test() -> int:
     # -- keeping your place -------------------------------------------------- #
 
     # A place is saved on the way out and handed back on the way in, and what
-    # comes back may not fit any more: `m` grows the list under it, `r` can
-    # shrink it, and the terminal may have been resized in between. Every one
-    # of those has to land on a row the screen actually draws — a cursor off
-    # the end would leave every key working and nothing appearing to move.
+    # comes back may not fit any more: a deeper look grows the list under it,
+    # `r` can shrink it, and the terminal may have been resized in between.
+    # Every one of those has to land on a row the screen actually draws — a
+    # cursor off the end would leave every key working and nothing appearing
+    # to move.
     check("a place that still fits is left alone", viewport(17, 12, 9, 60), (17, 12))
     # The deeper look completes the ↓ that asked for it: from the last row
-    # the place steps one on, onto the first new video; from anywhere else
-    # (the m alias) it stays put, and an empty list has no last row.
+    # the place steps one on, onto the first new video; from anywhere else it
+    # stays put, and an empty list has no last row.
     check("a deeper look from the last row steps on", bumped_place((29, 20), 30), (30, 20))
     check("from mid-list it stays put", bumped_place((10, 5), 30), (10, 5))
     check("and an empty list has no last row", bumped_place((0, 0), 0), (0, 0))

@@ -33,8 +33,8 @@ Four screens, and `q` or esc always goes back exactly one of them:
    age and the length; ↑↓ to move, ←→ (or page up/down) to jump a screenful,
    enter to see the formats, `/` to search again with your words still there —
    or, on the feed, `r` to read it again. **It keeps your place**: queueing a
-   video, backing out of the format list, `m` and `r` all put you back where
-   you were rather than at the top.
+   video, backing out of the format list, a deeper look and `r` all put you
+   back where you were rather than at the top.
 3. **Format list** — pick with ↑↓; enter queues it for tonight, `n` starts it
    now. The cursor opens on whatever you chose last time.
 4. **Confirm** — shows the size and the cap; `e` edits the priority number or
@@ -141,13 +141,12 @@ search hit is.
   which is what 150 rows needs and what a phone's page keys are too buried to
   give.
 - **↓ at the bottom of the list goes further back**, thirty at a time, up to
-  150 (`m` still works too). The line under the banner is the price of the
-  next look before you take it — and it is the **total**, not the extra
-  thirty, because YouTube's pages are sequential: there is no asking for
-  videos 31–60 without walking 1–30 to reach them, so going deeper re-buys
-  what is already on screen. Five looks is
-  0.2 + 0.4 + 0.6 + 0.8 + 1.0 MB, so going deep is worth doing in one decision
-  rather than five idle taps.
+  150. The line under the banner is the price of the next look before you
+  take it — and it is the **total**, not the extra thirty, because YouTube's
+  pages are sequential: there is no asking for videos 31–60 without walking
+  1–30 to reach them, so going deeper re-buys what is already on screen. Five
+  looks is 0.2 + 0.4 + 0.6 + 0.8 + 1.0 MB, so going deep is worth doing in one
+  decision rather than five idle taps.
 - **The deeper look switches itself off at the bottom of the feed.** ↓ stops
   at the last row like any list, and if YouTube hands back
   fewer videos than were asked for, that is everything it has, and the line
