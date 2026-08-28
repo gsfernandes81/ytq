@@ -24,11 +24,13 @@ Decisions that travel with this code:
   `looks_like_feed` is asked *before* `looks_like_url` because the feed's URL
   passes that test too. It is not a fifth screen: `results()` draws both.
   `--playlist-end` is the whole cost argument (`subs_argv`'s self-test pins it
-  beside the search's); **`m` goes further back and every press re-buys the
-  listing** (`feed_cost` is the total, never the increment, and `feed_meta`
-  puts it on screen before the key is pressed); fewer rows back than asked for
-  is the end of the feed, told apart from `SUBS_MAX` in words; the depth
-  commits only on a fetch that came back (`subs_want` vs `subs_asked`).
+  beside the search's); **↓ at the last row goes further back and every look
+  re-buys the listing** (2026-08-28: the hinted key is the down arrow, `m`
+  stays as an unhinted alias; `feed_cost` is the total, never the increment,
+  and `feed_meta` puts it on screen before the key is pressed); fewer rows
+  back than asked for is the end of the feed, told apart from `SUBS_MAX` in
+  words; the depth commits only on a fetch that came back (`subs_want` vs
+  `subs_asked`).
 - **The cookie is asked about before anything is spent** — `cookie_state`
   reads yt-dlp's own config with `shlex`, and refuses on a missing
   `--cookies` line or a jar not on disk. **An empty feed is never reported as
@@ -69,6 +71,14 @@ Decisions that travel with this code:
 - **`Choice.kind` decides an item's destination** — never the file extension
   (at queue time there is no file); `ytq.dest_for` is the one place, `--dest`
   wins over both.
+- **The format list's columns carry the codec family; the selected row says
+  it exactly** (2026-08-28) — `Choice.codecs` keeps yt-dlp's full strings
+  (`_exact_codec`, beside `_codec` which truncates for the columns) and the
+  formats screen draws them for the cursor row alone on the line above the
+  hints. `c` there copies the page URL through `to_clipboard`
+  (termux-clipboard-set; its answer flashes on the same line), and the fetch
+  wait is `spinner_while`'s box over the calling screen, never a page of its
+  own — nothing erases, so the results stay visible behind it.
 
 ## Checks
 

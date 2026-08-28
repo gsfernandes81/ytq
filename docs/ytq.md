@@ -128,25 +128,28 @@ search hit is.
 
 ```
  subscriptions
- 30 videos · just now · m 60 ~0.4MB
+ 30 videos · just now · ↓ 60 ~0.4MB
  Crust of Rust: Subtyping and Variance
    Jon Gjengset · ~3d · 90m34s
  ✓ Making a Case for Rust
    Some Channel · ~1w · 12m40s
 ```
 
-- **`m` keeps your place.** The videos already on screen keep their positions
-  when the list grows underneath them, so a deeper look carries on from where
-  you were reading instead of starting again. ←→ jump a screenful, which is
-  what 150 rows needs and what a phone's page keys are too buried to give.
-- **`m` goes further back**, thirty at a time, up to 150. The line under the
-  banner is the price of the next press before you press it — and it is the
-  **total**, not the extra thirty, because YouTube's pages are sequential:
-  there is no asking for videos 31–60 without walking 1–30 to reach them, so
-  going deeper re-buys what is already on screen. Five presses is
+- **Going deeper keeps your place.** The videos already on screen keep their
+  positions when the list grows underneath them, so a deeper look carries on
+  from where you were reading instead of starting again. ←→ jump a screenful,
+  which is what 150 rows needs and what a phone's page keys are too buried to
+  give.
+- **↓ at the bottom of the list goes further back**, thirty at a time, up to
+  150 (`m` still works too). The line under the banner is the price of the
+  next look before you take it — and it is the **total**, not the extra
+  thirty, because YouTube's pages are sequential: there is no asking for
+  videos 31–60 without walking 1–30 to reach them, so going deeper re-buys
+  what is already on screen. Five looks is
   0.2 + 0.4 + 0.6 + 0.8 + 1.0 MB, so going deep is worth doing in one decision
   rather than five idle taps.
-- **`m` switches itself off at the bottom of the feed.** If YouTube hands back
+- **The deeper look switches itself off at the bottom of the feed.** ↓ stops
+  at the last row like any list, and if YouTube hands back
   fewer videos than were asked for, that is everything it has, and the line
   says `the whole feed` instead of a price. At 150 it says `at the cap`, which
   is the different sentence: there *is* more and ytq will not spend it. A
@@ -212,6 +215,17 @@ search hit is.
   one window comfortably, amber is most of one, red spans several. Anything
   needing more than one night also says so in words (`(8 nights)`), because a
   terminal without colours must not be the one that loses the warning.
+
+- **The row under the cursor says its codecs in full** on the line above the
+  hints — `avc1.640028 + mp4a.40.2`, exactly as yt-dlp reported them. The
+  columns above only carry the family (`avc1`, `vp9`), and which av01 profile
+  a stream is decides whether the player on the other end can play it.
+- **`c` copies the video's page URL** to the Android clipboard (needs the
+  Termux:API app; the line above the hints says whether it worked). The page
+  URL, not a stream URL — streams are signed and expire in hours.
+
+While formats are being fetched, the wait is a small box over the list you
+pressed enter on, not a page of its own; Esc abandons it.
 
 On a phone in portrait the format id and the codec detail drop off — they are
 the two columns nobody chooses on — leaving the size, the label and the nights:

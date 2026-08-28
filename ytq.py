@@ -192,8 +192,8 @@ HINTS = {
     # ↑↓ is dropped from these two and nowhere else: it is the most guessable
     # key on a list and `m` is the one whose absence costs somebody the videos
     # they came here for.
-    "subs": "⏎ quality  m more  r fresh  q back",
-    "subs-running": "x stop  ⏎ quality  m more  q back",
+    "subs": "⏎ quality  ↓ more  r fresh  q back",
+    "subs-running": "x stop  ⏎ quality  ↓ more  q back",
     # And the same two with `m` spent. A key drawn in the hints that does
     # nothing when pressed is the shape somebody presses three times before
     # deciding the tool is broken — and this one used to look like the way to
@@ -217,8 +217,8 @@ TIGHT_HINTS = {
     "entry": "⏎ go  esc quit",
     "results": "↑↓  ⏎ formats  / new  q back",
     "running": "x stop  ↑↓  ⏎ formats  q back",
-    "subs": "⏎ pick  m more  r new  q back",
-    "subs-running": "x stop  ⏎ pick  m more  q back",
+    "subs": "⏎ pick  ↓ more  r new  q back",
+    "subs-running": "x stop  ⏎ pick  ↓ more  q back",
     "subs-end": "⏎ pick  r new  q back",
     "subs-end-running": "x stop  ⏎ pick  q back",
     "pick": "↑↓  ⏎ queue  n now  q back",
@@ -735,9 +735,9 @@ def feed_meta(
         # parsed, and the columns are better spent on the number than on the
         # gap in front of MB.
         deeper = (
-            f"m {more} for {feed_cost(more)}"
+            f"↓ {more} for {feed_cost(more)}"
             if width >= WIDE
-            else f"m {more} {feed_cost(more).replace(' ', '')}"
+            else f"↓ {more} {feed_cost(more).replace(' ', '')}"
         )
     else:
         deeper = "at the cap" if at_cap else "the whole feed"
@@ -863,6 +863,7 @@ class Choice:
         label: str,
         detail: str,
         merge_ext: str | None = None,
+        codecs: str = "",
     ) -> None:
         self.kind = kind
         self.fmt = fmt
@@ -872,6 +873,11 @@ class Choice:
         self.label = label
         self.detail = detail
         self.merge_ext = merge_ext
+        #: The codec strings exactly as yt-dlp reported them ("avc1.640028",
+        #: "av01.0.08M.08"), untruncated. The list columns carry only the
+        #: family (:func:`_codec`), because a column has a width budget; this
+        #: is for the one line that shows the selected row in full.
+        self.codecs = codecs
 
     @property
     def expect_bytes(self) -> int:
@@ -1170,6 +1176,18 @@ def _codec(name: str | None) -> str:
     return name.split(".")[0]
 
 
+def _exact_codec(name: str | None) -> str:
+    """The codec exactly as yt-dlp said it, profile and all.
+
+    :func:`_codec` cuts "avc1.640028" to "avc1" for the columns; this keeps
+    it whole for :attr:`Choice.codecs`, because which av01 profile a stream
+    is decides whether a player can play it at all.
+    """
+    if not name or name == "none":
+        return "-"
+    return name
+
+
 def choices(info: dict) -> tuple[list[Choice], int]:
     """Selectable downloads, best first, plus a count of unsized formats.
 
@@ -1226,6 +1244,8 @@ def choices(info: dict) -> tuple[list[Choice], int]:
                 fmt.get("ext") or "mp4",
                 f"{_video_label(fmt)} {fmt.get('ext')}",
                 f"one file, {_codec(fmt.get('vcodec'))}+{_codec(fmt.get('acodec'))}",
+                codecs=f"{_exact_codec(fmt.get('vcodec'))} + "
+                f"{_exact_codec(fmt.get('acodec'))}",
             )
         )
 
@@ -1255,6 +1275,8 @@ def choices(info: dict) -> tuple[list[Choice], int]:
                 f"{_codec(fmt.get('vcodec'))} + "
                 f"{_codec(afmt.get('acodec'))} {int(afmt.get('abr') or 0)}k, merged",
                 merge_ext=merge,
+                codecs=f"{_exact_codec(fmt.get('vcodec'))} + "
+                f"{_exact_codec(afmt.get('acodec'))}",
             )
         )
 
@@ -1268,6 +1290,7 @@ def choices(info: dict) -> tuple[list[Choice], int]:
                 fmt.get("ext") or "m4a",
                 f"audio {int(fmt.get('abr') or 0)}k {fmt.get('ext')}",
                 f"{_codec(fmt.get('acodec'))}, no video",
+                codecs=_exact_codec(fmt.get("acodec")),
             )
         )
 
@@ -1946,6 +1969,28 @@ def ink(win) -> dict[str, int]:
     return got
 
 
+def to_clipboard(text: str) -> str:
+    """Put *text* on the Android clipboard. The answer is for a person.
+
+    termux-clipboard-set is part of Termux:API — the CLI package plus the
+    app, the same pair the queue's scheduler needs — so its absence gets the
+    install line, not a stack trace. The text goes over stdin: an argv URL
+    can hit the command line where a pasted one has quoting in it.
+    """
+    tool = shutil.which("termux-clipboard-set")
+    if not tool:
+        return "no termux-clipboard-set - pkg install termux-api"
+    try:
+        done = subprocess.run(
+            [tool], input=text, text=True, capture_output=True, timeout=10
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return f"clipboard failed: {exc}"
+    if done.returncode != 0:
+        return "clipboard failed - is the Termux:API app installed?"
+    return "copied: " + text
+
+
 def format_row(option: Choice, width: int) -> str:
     """One line of the format list, at whatever width there is for it.
 
@@ -2118,7 +2163,15 @@ def text_input(win, y: int, x: int, initial: str = "", width: int = 60) -> str |
 
 
 def spinner_while(win, message: str, work) -> tuple[object, Exception | None]:
-    """Run *work* in a thread, keeping the screen alive while it goes."""
+    """Run *work* in a thread, saying so in a box over the screen that asked.
+
+    A modal rather than a page of its own (2026-08-28): every fetch this
+    waits on was started FROM somewhere — the results being deepened, the
+    search just typed — and blanking that context made a two-second wait read
+    as a navigation. Nothing here erases, so the last frame the caller drew
+    stays behind the box, and whatever comes back redraws over the lot.
+    Esc still abandons the wait, exactly as it did on the full page.
+    """
     result: list = [None, None]
 
     def target():
@@ -2134,16 +2187,28 @@ def spinner_while(win, message: str, work) -> tuple[object, Exception | None]:
     tick = 0
     try:
         while thread.is_alive():
-            win.erase()
-            _addstr(win, 1, 2, f"{frames[tick % 4]} {message}", curses.A_BOLD)
-            _addstr(
-                win,
-                3,
-                2,
+            height, width = win.getmaxyx()
+            note = (
                 "metadata only, no media"
-                if win.getmaxyx()[1] < WIDE
-                else "metadata only, no media is downloaded",
+                if width < WIDE
+                else "metadata only, no media is downloaded"
             )
+            body = [f"{frames[tick % 4]} {message}", note]
+            # An ASCII box, sized to its longest line and clamped to the
+            # terminal; the frame is what says "this is on top of that".
+            inner = min(max(len(row) for row in body) + 2, max(10, width - 4))
+            left = max(0, (width - inner - 2) // 2)
+            row0 = max(0, height // 2 - 2)
+            _addstr(win, row0, left, "+" + "-" * inner + "+")
+            for offset, row in enumerate(body, start=1):
+                _addstr(
+                    win,
+                    row0 + offset,
+                    left,
+                    "|" + f" {fit(row, inner - 2)}".ljust(inner) + "|",
+                    curses.A_BOLD if offset == 1 else 0,
+                )
+            _addstr(win, row0 + len(body) + 1, left, "+" + "-" * inner + "+")
             win.refresh()
             tick += 1
             time.sleep(0.12)
@@ -2177,6 +2242,7 @@ def pick(
     paint = paint if paint is not None else dict.fromkeys(("fits", "head"), 0)
     top = 0
     cursor = max(0, min(start, len(options) - 1))
+    flash: str | None = None
 
     while True:
         win.erase()
@@ -2235,6 +2301,24 @@ def pick(
             attr = curses.A_REVERSE if chosen else paint.get(cost_band(option.size), 0)
             _addstr(win, 3 + row, 0, line.ljust(width - 1), attr)
 
+        # The row under the cursor says its codecs in full, on the spare line
+        # above the hints. The list columns carry only the family (avc1, vp9)
+        # because a column has a width budget — but which av01 profile a
+        # stream is decides whether the player on the other end can play it,
+        # and yt-dlp already said exactly. One row at a time on purpose: all
+        # of them at once is a wall nothing can be read off. A flash — the
+        # clipboard's answer to `c` — borrows the line for one keypress.
+        if flash:
+            _addstr(win, height - 3, 1, fit(flash, width - 2), curses.A_BOLD)
+        elif options:
+            _addstr(
+                win,
+                height - 3,
+                1,
+                fit(options[cursor].codecs, width - 2),
+                curses.A_DIM,
+            )
+
         if narrow:
             keys = hint("pick-now" if now_default else "pick", width)
         elif now_default:
@@ -2244,14 +2328,27 @@ def pick(
             )
         else:
             keys = (
-                "↑↓ choose   enter queue it   n download it now   q back   ~ = estimate"
+                "↑↓ choose   enter queue it   n download it now   "
+                "c copy url   q back   ~ = estimate"
             )
         _addstr(win, height - 2, 1, keys, curses.A_DIM)
         win.refresh()
 
         key = win.getch()
+        flash = None
         if key in (ord("q"), 27):
             return None
+        if key == ord("c"):
+            # The page URL, not a stream URL: streams are signed and expire in
+            # hours, and what somebody pastes elsewhere is the video.
+            flash = to_clipboard(
+                str(
+                    info.get("webpage_url")
+                    or info.get("original_url")
+                    or info.get("url")
+                    or ""
+                )
+            )
         if key in (curses.KEY_UP, ord("k")):
             cursor -= 1
         elif key in (curses.KEY_DOWN, ord("j")):
@@ -2753,6 +2850,8 @@ def results(
         # Guarded on there actually being more, so that at the bottom of the
         # feed this is a key that does nothing rather than one that buys the
         # same listing again — and the meta line above says which it is.
+        # The hinted key is ↓ at the bottom of the list (below); m stays for
+        # the fingers that learned it, unhinted.
         if feed and more and key == ord("m"):
             return "m", here
         if key == ord("x"):
@@ -2760,6 +2859,14 @@ def results(
         elif key in (curses.KEY_UP, ord("k")):
             cursor -= 1
         elif key in (curses.KEY_DOWN, ord("j")):
+            # On the feed, down at the last row keeps going: it fetches the
+            # next page instead of stopping dead (2026-08-28, replacing `m`
+            # in the hints). The consent rule holds — the meta line above has
+            # been saying what the deeper look costs since before this key
+            # was pressed — and at the end of the feed or the cap `more` is
+            # None, so this is the same key doing nothing at the same floor.
+            if feed and more and hits and cursor == len(hits) - 1:
+                return "m", here
             cursor += 1
         # The arrows alias the page keys rather than replacing them: `m` can
         # make this list five times longer than it was, and on a phone the
@@ -3412,6 +3519,14 @@ def _self_test() -> int:
         "unknown codecs are playable, not storyboards", by_fmt["direct"].kind, "single"
     )
     check("progressive needs no merge", by_fmt["18"].merge_ext, None)
+    # The exact strings, whole — _codec would say "avc1"; the screen's
+    # selected-row line must get the profile the extractor actually reported.
+    check("a merge says both codecs exactly", by_fmt["137+140"].codecs,
+          "avc1.64 + mp4a")
+    check("progressive says both exactly", by_fmt["18"].codecs,
+          "avc1.42 + mp4a")
+    check("audio-only says its one codec", by_fmt["251"].codecs, "opus")
+    check("an unknown codec is not dressed up", by_fmt["direct"].codecs, "- + -")
     check("largest video first", options[0].fmt, "137+140")
     check(
         "audio-only sorts below video",
@@ -3885,8 +4000,8 @@ def _self_test() -> int:
     for name in ("subs", "subs-running", "subs-end", "subs-end-running"):
         check(f"{name} is a screen both hint sets know", name in HINTS and name in TIGHT_HINTS, True)
         check(
-            f"and only {name} without -end offers m",
-            "m " in hint(name, 40),
+            f"and only {name} without -end offers more",
+            "↓ more" in hint(name, 40),
             not name.startswith("subs-end"),
         )
 
