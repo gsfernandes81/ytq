@@ -1,2 +1,5 @@
 __pycache__/
 *.pyc
+
+# uv-managed dev environment (make dev)
+.venv/

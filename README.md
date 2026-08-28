@@ -29,7 +29,9 @@ ln -s ~/ytq/completions/ytq.fish ~/.config/fish/completions/
 
 ## Checks
 
-`make test` (pytest) or `make check` — the same self-tests;
+`make dev` (`uv sync`, once, networked) puts the locked pytest into `.venv`;
+then `make test` (`uv run --offline pytest`) or `make check` — the same
+self-tests;
 `.githooks/checks.sh` is the one copy and the pre-push hook
 (`git config core.hooksPath .githooks`) refuses a push that fails them.
 They need the sibling checkouts present, and a shallow clone path — the
