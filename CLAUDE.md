@@ -80,6 +80,16 @@ Decisions that travel with this code:
   wait is `spinner_while`'s box over the calling screen, never a page of its
   own — nothing erases, so the results stay visible behind it.
 
+- **A flick scrolls; only a keypress spends** (2026-08-28). The results and
+  formats screens take wheel events — what Termux turns a touch drag into —
+  via `enable_touch_scroll` (wheels only: a tap must never press a key, and
+  some keys here spend data) and `read_wheel`/`wheel_step`, which dlq's
+  screen imports rather than re-spelling. The wheel deliberately does NOT
+  trigger the feed's deeper look at the bottom: ↓ is a decision, a flick is
+  momentum. And the deeper look completes the ↓ that asked for it —
+  `bumped_place` steps the cursor onto the first new row once the longer
+  listing lands, and stays put for the mid-list `m` alias.
+
 ## Checks
 
 `make test` (pytest) = `make check` (`.githooks/checks.sh`, the one copy; the

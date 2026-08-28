@@ -155,6 +155,11 @@ search hit is.
   is the different sentence: there *is* more and ytq will not spend it. A
   deeper look that fails changes nothing — the count and the price go back to
   what is actually on screen.
+- **A touch drag scrolls the list.** Termux hands a drag to the app as
+  wheel events; they move the cursor and stop dead at both ends —
+  deliberately never the deeper look, which stays on ↓ alone, because a
+  flick is momentum and only a decision may spend data. After a deeper
+  look loads, the cursor steps onto the first video that just arrived.
 - **The selected title scrolls when it does not fit.** Only the one under the
   cursor, slowly, and only when it is genuinely too long for the room; every
   other row keeps its `…` and stays still, because a list where every line

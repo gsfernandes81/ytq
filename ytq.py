@@ -234,6 +234,49 @@ def hint(name: str, width: int) -> str:
     return (TIGHT_HINTS if width < TIGHT else HINTS)[name]
 
 
+#: Wheel events, which is what Termux turns a touch drag into once a
+#: full-screen app switches mouse reporting on. BUTTON5 (wheel down) only
+#: exists on ncurses built with mouse version 2 — Termux's is — so it is
+#: looked up rather than imported, and a build without it simply reports no
+#: wheel-down, which degrades to the arrow keys still working.
+WHEEL_UP = getattr(curses, "BUTTON4_PRESSED", 0)
+WHEEL_DOWN = getattr(curses, "BUTTON5_PRESSED", 0)
+
+
+def enable_touch_scroll() -> None:
+    """Ask for wheel events and nothing else.
+
+    Wheels only, on purpose: a tap must never press a key — a flick is
+    momentum, not a decision, and on this app some keys spend data. The
+    mask keeps taps unreported, so a stray touch is a no-op rather than an
+    enter. Harmless where there is no mouse support at all.
+    """
+    with contextlib.suppress(curses.error):
+        curses.mousemask(WHEEL_UP | WHEEL_DOWN)
+
+
+def wheel_step(bstate: int) -> int:
+    """A mouse bstate as a signed cursor step: up is -1, down is +1."""
+    if WHEEL_UP and bstate & WHEEL_UP:
+        return -1
+    if WHEEL_DOWN and bstate & WHEEL_DOWN:
+        return 1
+    return 0
+
+
+def read_wheel() -> int:
+    """The step of the wheel event KEY_MOUSE announced, or 0.
+
+    The screens call this and :func:`wheel_step` carries the logic, so the
+    mapping is checkable without a terminal to click in.
+    """
+    try:
+        bstate = curses.getmouse()[4]
+    except curses.error:
+        return 0
+    return wheel_step(bstate)
+
+
 #: How many results one search asks for. One request either way — paging costs
 #: double, because ``ytsearch40`` re-fetches the first twenty to reach the rest,
 #: so a better query is always cheaper than a second page.
@@ -748,6 +791,21 @@ def feed_meta(
         parts.append(f"read {when}" if width >= WIDE else when)
     parts.append(deeper)
     return ("  ·  " if width >= WIDE else " · ").join(parts)
+
+
+def bumped_place(place: tuple[int, int], count: int) -> tuple[int, int]:
+    """Where a deeper look leaves the cursor once the longer listing lands.
+
+    ↓ at the last row is what asked for it, and that key's motion completes
+    when the fetch does: one row on, onto the first video that just arrived.
+    Asked from anywhere else (the unhinted `m` alias mid-list), the place
+    stays put. Overshoot is :func:`viewport`'s to clamp, so a feed that came
+    back no longer than it was leaves the cursor on the last row it had.
+    """
+    row, top = place
+    if count and row == count - 1:
+        return (row + 1, top)
+    return place
 
 
 def next_page(got: int, asked: int) -> tuple[int | None, bool]:
@@ -2355,6 +2413,8 @@ def pick(
             cursor -= 1
         elif key in (curses.KEY_DOWN, ord("j")):
             cursor += 1
+        elif key == curses.KEY_MOUSE:
+            cursor += read_wheel()
         elif key == curses.KEY_NPAGE:
             cursor += listed
         elif key == curses.KEY_PPAGE:
@@ -2870,6 +2930,12 @@ def results(
             if feed and more and hits and cursor == len(hits) - 1:
                 return "m", here
             cursor += 1
+        elif key == curses.KEY_MOUSE:
+            # A flick, not a keypress: the wheel moves the cursor and stops
+            # dead at both ends. Deliberately NOT the deeper look at the
+            # bottom — ↓ is a decision and a flick is momentum, and only a
+            # decision may spend data.
+            cursor += read_wheel()
         # The arrows alias the page keys rather than replacing them: `m` can
         # make this list five times longer than it was, and on a phone the
         # page keys are two taps into an extra-keys row the arrows sit on.
@@ -2956,6 +3022,7 @@ def app(
     """
     curses.curs_set(0)
     win.keypad(True)
+    enable_touch_scroll()
     paint = ink(win)
 
     receipts: list[str] = []
@@ -3138,6 +3205,7 @@ def app(
                 # The whole listing is bought again, not the extra thirty —
                 # `feed_cost` is the total for that reason, and the screen
                 # that offered this key said the total.
+                places[query] = bumped_place(places[query], len(hits))
                 subs_want, refetch, screen = more, True, "subs"
             elif isinstance(picked, str):
                 # `/` — the search prefills the field with the words that got
@@ -4032,6 +4100,17 @@ def _self_test() -> int:
     # of those has to land on a row the screen actually draws — a cursor off
     # the end would leave every key working and nothing appearing to move.
     check("a place that still fits is left alone", viewport(17, 12, 9, 60), (17, 12))
+    # The deeper look completes the ↓ that asked for it: from the last row
+    # the place steps one on, onto the first new video; from anywhere else
+    # (the m alias) it stays put, and an empty list has no last row.
+    check("a deeper look from the last row steps on", bumped_place((29, 20), 30), (30, 20))
+    check("from mid-list it stays put", bumped_place((10, 5), 30), (10, 5))
+    check("and an empty list has no last row", bumped_place((0, 0), 0), (0, 0))
+    # The wheel is a cursor step and only ever that: up -1, down +1, anything
+    # else 0 — the mapping the touch-scroll screens all share.
+    check("wheel up is a step up", wheel_step(WHEEL_UP), -1 if WHEEL_UP else 0)
+    check("wheel down is a step down", wheel_step(WHEEL_DOWN), 1 if WHEEL_DOWN else 0)
+    check("a tap is no step at all", wheel_step(0), 0)
     check("a cursor past the end comes back to the last row", viewport(90, 80, 9, 60), (59, 51))
     check("and brings a full screen with it", viewport(90, 90, 9, 60), (59, 51))
     check("an empty list does not go negative", viewport(4, 2, 9, 0), (0, 0))

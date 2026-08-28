@@ -3,3 +3,4 @@ __pycache__/
 
 # uv-managed dev environment (make dev)
 .venv/
+.pytest_cache/
