@@ -1,6 +1,6 @@
 # Completions for ytq, which searches for a video and queues it.
 #
-#   ln -s ~/or3/termux/expire/completions/ytq.fish ~/.config/fish/completions/
+#   ln -s ~/ytq/completions/ytq.fish ~/.config/fish/completions/
 #
 # The argument is either a URL or the words to search for, and nothing local
 # can complete either, so this is the options and their descriptions — and,

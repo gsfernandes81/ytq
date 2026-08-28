@@ -53,6 +53,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import re
 import shutil
 import signal
@@ -63,9 +64,19 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+# expire_dl lives in the dlq checkout: $EXPIRE_HOME, a clone beside this one,
+# or ~/dlq — the same three answers ytq._sibling gives, in the same order. A
+# queue item inserts the real path itself before importing this module, so
+# this resolution is for running out of the checkout (the self-test included).
+_dlq = os.environ.get("EXPIRE_HOME")
+_beside = Path(__file__).resolve().parent.parent / "dlq"
+sys.path.insert(1, str(
+    Path(_dlq).expanduser().resolve() if _dlq
+    else (_beside.resolve() if _beside.is_dir() else Path.home() / "dlq")
+))
 
-import expire_dl  # noqa: E402  (sibling module, path fixed up above)
-import contextlib
+import expire_dl  # noqa: E402  (from the dlq checkout, path fixed up above)
+import contextlib  # noqa: E402  (kept beside the sibling imports above)
 
 COMPLETE = expire_dl.COMPLETE
 PROGRESS = expire_dl.PROGRESS

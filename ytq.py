@@ -74,35 +74,47 @@ import threading
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+MODULE_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(MODULE_DIR))
 
 import ytdl_item  # noqa: E402  (sibling module, path fixed up above)
-import contextlib
+import contextlib  # noqa: E402  (kept beside the sibling imports above)
 
-#: Where the queue lives when this module is not being run from inside it.
-INSTALLED_ROOT = "~/or3/termux/expire"
+
+def _sibling(name: str, env: str) -> Path:
+    """A sibling checkout, found the way every cross-repo import here is.
+
+    ``$<env>`` wins so a checkout can live anywhere; then a clone beside this
+    one, which is what a dev tree looks like; then ``~/<name>``, which is
+    where the phone keeps them. The same three answers, in the same order, in
+    every module that reaches across a repo — dlq's modules resolve this
+    checkout identically.
+    """
+    override = os.environ.get(env)
+    if override:
+        return Path(override).expanduser().resolve()
+    beside = Path(__file__).resolve().parent.parent / name
+    if beside.is_dir():
+        return beside.resolve()
+    return Path.home() / name
 
 
 def _root() -> Path:
-    """The directory the runner works out of.
+    """The directory the runner works out of — the dlq checkout.
 
-    Deliberately not just this file's directory. ``uv tool install`` without
-    ``--editable`` copies these modules into a venv, and an item written next to
-    that copy would sit in site-packages where the nightly runner never looks —
-    queued, apparently fine, and never downloaded. A real queue root is the one
-    holding the queue's own contract file; ``EXPIRE_HOME`` overrides for a
-    checkout kept somewhere else.
+    Deliberately not this file's directory. The queue lives with the runner in
+    the dlq repo, and an item written next to this module — or next to the
+    copy ``uv tool install`` makes in a venv — would sit where the nightly
+    runner never looks: queued, apparently fine, and never downloaded.
+    ``EXPIRE_HOME`` overrides for a checkout kept somewhere else.
     """
-    override = os.environ.get("EXPIRE_HOME")
-    if override:
-        return Path(override).expanduser().resolve()
-    here = Path(__file__).resolve().parent
-    if (here / "queue" / "README.md").is_file():
-        return here
-    return Path(INSTALLED_ROOT).expanduser().resolve()
+    return _sibling("dlq", "EXPIRE_HOME")
 
 
 HERE = _root()
+# expire_runner and expire_dl live at the queue root; ytdl_item reaches
+# expire_dl through this same insert when run out of this checkout.
+sys.path.insert(0, str(HERE))
 QUEUE = HERE / "queue"
 STAGING = QUEUE / ".staging"
 DONE = HERE / "done"
@@ -608,7 +620,7 @@ def cookie_fix(detail: str) -> list[str]:
         f"export cookies.txt from the browser, netscape format, mode 600 and "
         f"never in the repo: {COOKIE_SUGGESTION}, named by --cookies in "
         f"{CONFIG_SUGGESTION}.",
-        "docs: ~/or3/docs/ytq.md",
+        "docs: ~/ytq/docs/ytq.md",
     ]
 
 
@@ -1040,7 +1052,7 @@ def own_upgrade() -> str:
     here = Path(__file__).resolve().parent
     copied = (venv / UV_RECEIPT).is_file() and str(here).startswith(str(venv.resolve()))
     if copied:
-        return "uv tool install or3-expire-queue --force"
+        return "uv tool install ytq --force"
     root = checkout_root()
     return f"git -C {tilde(root)} pull" if root else "reinstall ytq from the checkout"
 
@@ -1120,7 +1132,7 @@ def withheld_advice(
         # One entry, because the worst case — both of these being uv
         # commands — is a row over the phone's budget with two. The em-dash
         # is spaced so the path cannot read as part of the command.
-        f"ytq itself: {mine} — docs: ~/or3/docs/ytq.md",
+        f"ytq itself: {mine} — docs: ~/ytq/docs/ytq.md",
     ]
 
 
@@ -1511,6 +1523,7 @@ queue may take to work through a video this size.
 import sys
 
 sys.path.insert(0, {json.dumps(str(HERE))})
+sys.path.insert(0, {json.dumps(str(MODULE_DIR))})
 import ytdl_item  # noqa: E402
 
 sys.exit(ytdl_item.run(
@@ -2517,7 +2530,7 @@ def message_body(lines: list[str], width: int, rows: int) -> list[str]:
     if len(out) <= rows:
         return out
     keep = max(0, rows - 1)
-    return out[:keep] + [fit(f"…{len(out) - keep} more — see ~/or3/docs/ytq.md", width)]
+    return out[:keep] + [fit(f"…{len(out) - keep} more — see ~/ytq/docs/ytq.md", width)]
 
 
 def message(win, lines: list[str]) -> None:
@@ -3637,7 +3650,7 @@ def _self_test() -> int:
         f"{COOKIE_SUGGESTION}, written 23 days ago",
         version="2026.7.4",
         upgrade="python3.14 -m pip install -U yt-dlp",
-        mine="git -C ~/or3 pull",
+        mine="git -C ~/ytq pull",
     )
     # And the same notice at its LONGEST, which is the measurement that
     # matters: every string on it is composed from the machine, so the pretty
@@ -3653,7 +3666,7 @@ def _self_test() -> int:
         # `git -C` line — driven from the code rather than invented, or this
         # measures a notice the tool never shows.
         for worst_mine in (
-            "uv tool install or3-expire-queue --force",
+            "uv tool install ytq --force",
             "reinstall ytq from the checkout",
         ):
             longest = withheld_advice(
@@ -3688,7 +3701,7 @@ def _self_test() -> int:
           body.index(next(r for r in body if "cookies" in r))
           > body.index(next(r for r in body if "2026.7.4" in r)), True)
     check("and ytq's own upgrade is on it",
-          any("git -C ~/or3 pull" in row for row in body), True)
+          any("git -C ~/ytq pull" in row for row in body), True)
     # A command is only useful if it survives the fold intact.
     check("the upgrade command is one unbroken row",
           "python3.14 -m pip install -U yt-dlp" in body, True)
@@ -4472,7 +4485,7 @@ def main(argv: list[str] | None = None) -> int:
 
             plain file URLs queue with dlq instead; the queue itself is
             dlqd — bare for the screen, or dlqd (status|list|arm|logs).
-            docs: ~/or3/docs/ytq.md and ~/or3/docs/download-queue.md"""),
+            docs: ~/ytq/docs/ytq.md and ~/dlq/docs/download-queue.md"""),
     )
     parser.add_argument(
         "terms",
