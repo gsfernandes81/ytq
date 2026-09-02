@@ -30,9 +30,13 @@ ln -s ~/ytq/completions/ytq.fish ~/.config/fish/completions/
 ## Checks
 
 `make dev` (`uv sync`, once, networked) puts the locked pytest into `.venv`;
-then `make test` (`uv run pytest`) or `make check` — the same
-self-tests;
-`.githooks/checks.sh` is the one copy and the pre-push hook
-(`git config core.hooksPath .githooks`) refuses a push that fails them.
-They need the sibling checkouts present, and a shallow clone path — the
-screens check their own widths down to 32 columns.
+then `make test` or `make check` — both are `.githooks/checks.sh`, the one
+copy of what runs (pytest through `.venv` when there is one, plain `python3
+-m pytest` otherwise), and the pre-push hook
+(`git config core.hooksPath .githooks`) refuses a push that fails it.
+The tests need the sibling checkouts present, and a shallow clone path — the
+screens must fit their own widths down to 32 columns.
+
+The `--self-test` checks were removed on 2026-09-02; the pytest suite that
+replaces them is being written. Until it lands `tests/` is empty and the gate
+says "no tests yet" rather than blocking a push.

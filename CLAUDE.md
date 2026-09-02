@@ -23,7 +23,7 @@ Decisions that travel with this code:
 - **The entry field's third answer is `subs`, the subscription feed** —
   `looks_like_feed` is asked *before* `looks_like_url` because the feed's URL
   passes that test too. It is not a fifth screen: `results()` draws both.
-  `--playlist-end` is the whole cost argument (`subs_argv`'s self-test pins it
+  `--playlist-end` is the whole cost argument (a test must pin `subs_argv`
   beside the search's); **↓ at the last row goes further back and every look
   re-buys the listing** (2026-08-28: the down arrow is the only key that asks
   — the `m` alias it took over from is gone; `feed_cost` is the total, never
@@ -35,8 +35,8 @@ Decisions that travel with this code:
   reads yt-dlp's own config with `shlex`, and refuses on a missing
   `--cookies` line or a jar not on disk. **An empty feed is never reported as
   "nothing new"** — YouTube answers a logged-out feed with no entries, and
-  `empty_feed_advice` says what that means and how old the jar is; a check
-  pins that it does.
+  `empty_feed_advice` says what that means and how old the jar is; a test
+  must pin that it does.
 - **A format list holding nothing but 360p says why** — `withheld` reads the
   RAW formats, deliberately not `choices()`'s output, scoped to
   `ADAPTIVE_ALWAYS` because the claim is only true of YouTube. Said twice on
@@ -44,8 +44,8 @@ Decisions that travel with this code:
   applies to, measured at three widths, no `⚠` (ambiguous-width).
 - **The results screen hands its place back** — `results` takes and returns
   `(cursor, top)`, keyed by query, and `viewport` is what makes a restored
-  place safe on a list that grew, shrank or was resized; a check drives seven
-  restores. `←`/`→` alias page up/down and are in neither hint set — no room
+  place safe on a list that grew, shrank or was resized, and it wants a test
+  driving a spread of restores. `←`/`→` alias page up/down and are in neither hint set — no room
   at 38 columns; `docs/ytq.md` carries them.
 - **The selected title scrolls; nothing else does, and an idle screen still
   blocks.** `marquee` holds at the start of each lap; `title_room` is the one
@@ -120,6 +120,28 @@ Decisions that travel with this code:
 
 `make test` (pytest) = `make check` (`.githooks/checks.sh`, the one copy; the
 pre-push hook runs it). Offline: nothing reaches YouTube or the portal. Needs
-the sibling checkouts, and a shallow clone path — both screens check every
-line fits the terminal down to 32 columns, so a deep worktree is itself the
-width they cannot fit.
+the sibling checkouts, and a shallow clone path — a deep worktree is itself
+the width the screens cannot fit.
+
+**There are no tests right now.** `ytq.py --self-test` and `ytdl_item.py
+--self-test` were deleted outright on 2026-09-02 — the functions, the flags,
+the pytest shim over them and the completion entry — so that the whole thing
+can be rebuilt as a real pytest suite under `tests/`. Until that lands
+`checks.sh` reads pytest's exit 5 as "no tests yet" and passes, which is what
+keeps the interim commits pushable; the suite tightens it.
+
+Two helpers went with them, because nothing but a check ever called either:
+`shebang_here` (whether the interpreter every item names exists here, which is
+how a check asking the runner for a verdict knew to expect that one objection
+off Termux) and `json_leaks` (`null`/`true`/`false` left in a written item —
+valid Python *names*, so the item compiles and fails only on the night it was
+queued for). Both are worth having back in some form when the suite is
+written.
+
+What the suite has to cover: the byte metering `ytdl_item` does over the file
+layouts yt-dlp really produces — the merge case above all, where a double
+count stops the item mid-merge every night for ever — the cost-shaped argv
+(`search_argv`'s `--flat-playlist`, `subs_argv`'s `--playlist-end`), the
+duplicate refusal `write_item` is the one door for, `viewport` restoring a
+place on a list that grew or shrank, and every line of both screens fitting
+the terminal down to 32 columns.
