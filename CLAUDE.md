@@ -63,6 +63,21 @@ Decisions that travel with this code:
   a pasted URL, `--now`, `--from-json` and `dlq` all end there. The
   results list marks what the queue already holds — before the probe is
   spent.
+- **`p` on the confirm screen is dlq's listing, not a copy of it**
+  (2026-09-02). The video does not exist yet, so `expire_ui.pick_place` holds a
+  phantom row and gives back a **position**; ytq writes the item last exactly
+  as it always did and then asks `expire_ui.place` to put it there, so the
+  numbering rule, the cut line and the refusal all stay on dlq's side and
+  nothing is renamed before the file exists. **`expire_ui` is imported inside
+  the key handler and never at module top** — it binds `ytq._addstr` while it
+  loads, and at ytq's top that name is 1800 lines away: expire_ui imports
+  expire_sched, which imports this half-built module back, so the screen would
+  die at the import rather than at the key. `item_name` is the one spelling of
+  the name `write_item` makes, because a picker handed a second f-string is
+  holding a file nobody writes. A number typed with `e` and a place picked with
+  `p` are exclusive and the row shows the one in force; `n` drops the place,
+  because what starts now runs from the file under the name it was written
+  with. A refused move is a receipt line, never a traceback and never a retry.
 - **`next_number` caps at `MAX_PRIORITY`** — the runner sorts file names, so
   a third digit puts an item at the front, not the back.
 - **Downloading now spawns a detached `dlq now`** (by path under the queue

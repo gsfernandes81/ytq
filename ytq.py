@@ -202,7 +202,11 @@ HINTS = {
     "subs-end-running": "x stop  ⏎ quality  q back",
     "pick": "↑↓ pick  ⏎ queue  n now  q back  ~ est",
     "pick-now": "↑↓ pick  ⏎ now PAID  t queue  q back",
-    "queue": "⏎ queue  e edit  n now  q back",
+    # `p spot` is the fifth pair on the confirmation, and the reason the word
+    # is `spot` and not `place`: `place` is one column longer, and one column
+    # is what stood between this line and 38. The screen it opens is dlq's, so
+    # this is the only place ytq gives it a name.
+    "queue": "⏎ queue  e edit  p spot  n now  q back",
     "now": "⏎ start PAID  e edit  t queue  q back",
     "watch": "x stop  q back",
 }
@@ -223,7 +227,11 @@ TIGHT_HINTS = {
     "subs-end-running": "x stop  ⏎ pick  q back",
     "pick": "↑↓  ⏎ queue  n now  q back",
     "pick-now": "↑↓  ⏎ now PAID  q back",
-    "queue": "⏎ queue  e edit  n now  q back",
+    # `e edit` is what the spot costs at the floor — the same key the tight
+    # `now` set below already gives up. The number half of it is what `p spot`
+    # replaces; the name half is on every wider screen and in the docs. Nothing
+    # else here fits a fifth pair into 30 columns.
+    "queue": "⏎ queue  p spot  n now  q back",
     "now": "⏎ start PAID  t queue  q back",
     "watch": "x stop  q back",
 }
@@ -232,6 +240,34 @@ TIGHT_HINTS = {
 def hint(name: str, width: int) -> str:
     """The key hints for a screen, at whatever width there is for them."""
     return (TIGHT_HINTS if width < TIGHT else HINTS)[name]
+
+
+def confirm_hints(now: bool, width: int) -> str:
+    """The confirmation's action list, at whatever width there is for it.
+
+    The one screen with a third and fuller list: it is the last one before
+    something is written, and the only one where naming every key in words is
+    worth a whole line. Which of the three is drawn is decided by **what
+    fits**, and not by the layout's own :data:`WIDE` threshold, because the
+    pair a clipped list loses is the last one and the last one is ``q back`` —
+    the way out. The full list at 72 columns was already losing a letter of it.
+    """
+    full = (
+        "tab switch field   e edit   enter start it now   "
+        "t queue for tonight   q back"
+        if now
+        # The room for `p spot it` came out of `n download it now`, and of
+        # those words the one that had to survive is the one saying what it
+        # costs. A spot is not offered at all while this says NOW: what starts
+        # on enter is the file that was just written, under the name it was
+        # written with, and renaming it underneath that is a download of a name
+        # nothing has.
+        else "tab switch field   e edit   p spot it   enter write it   "
+        "n now PAID   q back"
+    )
+    # Drawn at x=1 and clipped at the last cell, so the room is two columns
+    # less than the terminal — the same two the sets above are measured to.
+    return full if len(full) <= width - 2 else hint("now" if now else "queue", width)
 
 
 #: Wheel events, which is what Termux turns a touch drag into once a
@@ -1619,6 +1655,23 @@ sys.exit(ytdl_item.run(
 '''
 
 
+def item_name(number: int, slug: str) -> str:
+    """The file name an item is written under — the one spelling of it.
+
+    Written here rather than in each of the three places that wanted it, which
+    is the screen showing where the file goes, the picker being told what it is
+    holding, and :func:`write_item` itself. A picker handed a name that is a
+    second f-string is a picker holding a file that is never written: the two
+    would agree today and drift the first time either is touched.
+    """
+    return f"{number:02d}-{slug}.py"
+
+
+def item_slug(name: str) -> str:
+    """That name read back: the number and the suffix taken off again."""
+    return ITEM_RE.sub("", name).removesuffix(".py")
+
+
 def write_item(number: int, slug: str, source: str, again: bool = False) -> Path:
     """Stage, make executable, then rename into the queue.
 
@@ -1638,7 +1691,7 @@ def write_item(number: int, slug: str, source: str, again: bool = False) -> Path
             raise found
     STAGING.mkdir(parents=True, exist_ok=True)
     QUEUE.mkdir(parents=True, exist_ok=True)
-    name = f"{number:02d}-{slug}.py"
+    name = item_name(number, slug)
     staged = STAGING / name
     # Written as UTF-8 because that is how the runner reads it. A title can
     # hold anything, and an item that decodes differently at midnight than it
@@ -2433,6 +2486,99 @@ def pick(
             return options[cursor], now_default
 
 
+def _ordinal(number: int) -> str:
+    """``1st``, ``2nd``, ``3rd`` — a position said the way a person says it.
+
+    Spelled here as well as on dlq's own listing, and deliberately: this row is
+    redrawn on every keystroke, and a confirmation that could not draw its own
+    priority row without the sibling checkout imported would be a screen that
+    goes blank on the one night the checkout is missing. Two spellings of
+    English, not two spellings of a rule — nothing about the queue is decided
+    here, and what the order actually becomes is dlq's answer either way.
+    """
+    if 10 <= number % 100 <= 20:
+        return f"{number}th"
+    return f"{number}{ {1: 'st', 2: 'nd', 3: 'rd'}.get(number % 10, 'th') }"
+
+
+def spot_said(pos: int, queued: list[str], width: int) -> str:
+    """Where a spot picked on dlq's listing puts this video, in the room given.
+
+    The priority row's value while a spot is in force, and the whole of what
+    says so: a number in that column is the number this item is written with,
+    and ``3rd of 6`` is dlq deciding it instead. The two are exclusive and the
+    row never shows both, because a screen showing a number beside a place is a
+    screen nobody can tell the answer off.
+
+    *queued* is the queue as it stood when the spot was picked — the items the
+    position was picked *among*, which do not include this video, so it is one
+    longer than they are. The neighbour is dropped whole rather than clipped
+    when the room runs out: a name cut in half is a name read as another item,
+    and the position is the fact this row exists to carry.
+    """
+    pos = max(0, min(pos, len(queued)))
+    where = f"{_ordinal(pos + 1)} of {len(queued) + 1}"
+    if not pos:
+        return fit(where, width)
+    after = f"{where} (after {item_slug(queued[pos - 1])})"
+    return after if len(after) <= width else fit(where, width)
+
+
+def pick_spot(win, name: str, cap: int, pos: int | None) -> tuple[int | None, str]:
+    """dlq's own listing with this video held in it: the spot, or why not.
+
+    Returns the position picked and nothing to say, or what went wrong with the
+    position left exactly as it was. Nothing here draws the queue: the screen
+    is dlq's, held-item mode and all, so there is one listing and not a second
+    one that could disagree with it about what is queued or where the night's
+    allowance runs out.
+
+    ``expire_ui`` is imported **here** rather than at the top of this module,
+    which is not a style: it reads ``ytq._addstr`` while it loads, and at the
+    top of ytq that name does not exist yet — expire_ui imports expire_sched,
+    which imports this half-built module back. The screen would then die at
+    the import rather than at the key. By the time a key can be pressed, all
+    of it is there.
+    """
+    try:
+        sys.path.insert(0, str(HERE))
+        import expire_ui
+
+        picked = expire_ui.pick_place(win, name, cap, partial=True, pos=pos)
+    except Exception as exc:  # noqa: BLE001 - a screen, never a blocker
+        return pos, repr(exc)
+    # Leaving that listing is not the same as taking the last place in it:
+    # whatever was in force before stays in force.
+    return (pos if picked is None else picked), ""
+
+
+def take_spot(name: str, pos: int | None) -> str | None:
+    """Put the item just written at the spot that was picked; say what happened.
+
+    ``None`` when no spot was picked, which is the whole of that condition —
+    the caller keeps no second copy of it. Asked *after* the item exists,
+    because what dlq moves is a file and there is no file until
+    :func:`write_item` has returned; and it is asked of dlq rather than
+    answered here, because the number that comes out of a position is the one
+    numbering rule and it lives on that side.
+
+    A refusal — a firing or another download holding the queue — comes back as
+    a sentence and never as an exception. The item is written and queued either
+    way; what a refusal costs is the order, which the listing can still change
+    tomorrow, so there is nothing here worth a second attempt.
+    """
+    if pos is None:
+        return None
+    try:
+        sys.path.insert(0, str(HERE))
+        import expire_ui
+
+        said, moved = expire_ui.place(name, pos)
+    except Exception as exc:  # noqa: BLE001 - a receipt, never a blocker
+        return f"{name} kept the place it was queued at: {exc!r}"
+    return said if moved else f"{said} — {name} is last in the queue"
+
+
 #: The confirmation's two field labels, drawn at x=2 with their values in a
 #: column to the right of them.
 CONFIRM_LABELS = ("priority", "file name")
@@ -2454,15 +2600,28 @@ def confirm(
     now: bool = False,
     paint: dict | None = None,
     dest: str = "video",
-) -> tuple[int, str, bool] | None:
+) -> tuple[int, str, bool, int | None] | None:
     """Let the priority, the file name and free-or-paid be settled.
 
-    Returns the priority, the slug and whether to download now. ``n`` and ``t``
-    switch between the two modes here as well as on the format list, because
-    this is the screen showing the number that decides it.
+    Returns the priority, the slug, whether to download now, and the spot in
+    the queue that was picked for it, if one was. ``n`` and ``t`` switch
+    between the two modes here as well as on the format list, because this is
+    the screen showing the number that decides it.
+
+    The priority and the spot are the same field answered two ways and are
+    exclusive on purpose: a number typed here is the number the item is written
+    with, and a spot is dlq being asked to work the number out from where the
+    video was put. Whichever was chosen last is the one in force, and the row
+    shows that one alone.
     """
     number = next_number()
     slug = slugify(info.get("title") or "")
+    # The spot picked on dlq's listing, and the queue it was picked among. A
+    # position and not a number, because a position is still true after the
+    # slug is edited, after another item is queued, and after dlq renumbers the
+    # queue on its way to honouring it.
+    spot: int | None = None
+    queued: list[str] = []
     paint = paint if paint is not None else dict.fromkeys(("fits", "head"), 0)
     # Resolved once: it needs the runner's config, and this redraws on
     # every keystroke.
@@ -2525,7 +2684,13 @@ def confirm(
             # nobody needs at 40 columns.
             _addstr(win, 9, 2, f"→ {slug}.{choice.ext}")
         else:
-            _addstr(win, 9, 2, f"→ queue/{number:02d}-{slug}.py")
+            # The name it is *written* with, which is what the number on it
+            # means. A spot taken renames it a second later — said here rather
+            # than left to be noticed, because the receipt names the file.
+            wrote = f"→ queue/{item_name(number, slug)}"
+            if spot is not None:
+                wrote += ", renumbered at the spot"
+            _addstr(win, 9, 2, fit(wrote, width - 3))
             _addstr(win, 10, 2, fit(f"→ {where}/{slug}.{choice.ext}", width - 3))
         if now:
             # The second of the three places this says paid, and the only one
@@ -2550,19 +2715,22 @@ def confirm(
             win,
             height - 2,
             1,
-            hint("now" if now else "queue", width)
-            if narrow
-            else "tab switch field   e edit   "
-            + (
-                "enter start it now   t queue for tonight"
-                if now
-                else "enter write it   n download it now"
-            )
-            + "   q back",
+            confirm_hints(now, width),
             curses.A_DIM,
         )
 
-        _addstr(win, 6, gutter, f"{number:02d}", curses.A_REVERSE if field == 0 else 0)
+        # The editor must not be told it has more room than the window does, or
+        # the field it underlines runs off the right of a phone. The same room
+        # bounds the priority row, which says a place in words when one is in
+        # force and is otherwise the two digits it always was.
+        room = max(8, width - gutter - 2)
+        _addstr(
+            win,
+            6,
+            gutter,
+            f"{number:02d}" if spot is None else spot_said(spot, queued, room),
+            curses.A_REVERSE if field == 0 else 0,
+        )
         # Clipped with an ellipsis rather than by the window edge: a long slug
         # cut off at the last column looks like the whole file name, and this
         # is the screen where the file name is being decided.
@@ -2582,18 +2750,50 @@ def confirm(
             field = 1 - field
         elif key == ord("n"):
             now = True
+            # A download that starts now takes no place in the queue: it is run
+            # from the file the moment it is written, under the name it was
+            # written with, and moving that file underneath it is a download of
+            # a name nothing has. So the spot goes, visibly — the row is a
+            # number again — rather than being quietly not honoured.
+            spot = None
         elif key == ord("t"):
             now = False
         elif key in (curses.KEY_ENTER, 10, 13):
-            return number, slug, now
+            return number, slug, now, spot
+        elif key == ord("p") and not now:
+            spot, why = pick_spot(
+                win, item_name(number, slug), choice.expect_bytes, spot
+            )
+            # Read after the listing closes and not before it opens: it is what
+            # the position was picked among, and it is the same walk the
+            # duplicate check already does rather than a second reading of the
+            # queue through the manager.
+            queued = [found.name for state, found in items() if state == "queued"]
+            if why:
+                message(
+                    win,
+                    [
+                        "the queue listing could not be opened",
+                        why,
+                        # Whatever was in force stays in force, which for a
+                        # first attempt is no place at all: last.
+                        "the place picked before it still stands"
+                        if spot is not None
+                        else "the video will be queued last",
+                    ],
+                )
         elif key in (ord("e"), ord("i")):
-            # The editor must not be told it has more room than the window
-            # does, or the field it underlines runs off the right of a phone.
-            room = max(8, width - gutter - 2)
             if field == 0:
+                # Cleared first: the row may be holding a place in words, which
+                # is wider than the eight columns the editor draws over.
+                _addstr(win, 6, gutter, " " * room)
                 typed = text_input(win, 6, gutter, f"{number:02d}", min(8, room))
                 if typed and typed.isdigit():
                     number = max(0, min(99999, int(typed)))
+                    # A number typed is the number in force, so the spot picked
+                    # before it is not. The other way round is `p`, which is
+                    # the same rule from the other end.
+                    spot = None
             else:
                 typed = text_input(win, 7, gutter, slug, min(48, room))
                 if typed:
@@ -3283,7 +3483,7 @@ def app(
             if decided is None:
                 typed, screen = "", came_from
                 continue
-            number, slug, run_now = decided
+            number, slug, run_now, spot = decided
 
             item = render(
                 target,
@@ -3323,6 +3523,12 @@ def app(
             if run_now:
                 receipt = _start_or_say_why(win, running, path, choice) or receipt
             receipts.append(receipt)
+            # And then, and only then, the place picked for it: the item is
+            # written and queued whatever this says, which is why it is a
+            # second line rather than a condition on the first.
+            placed = take_spot(path.name, spot)
+            if placed:
+                receipts.append(placed)
 
             if came_from == "results":
                 marks.setdefault(query, set()).add(chosen_index)
@@ -3699,6 +3905,72 @@ def _self_test() -> int:
             "q " in tight or "esc " in tight,
             True,
         )
+    # The confirmation carries a third and fuller list, chosen by what fits
+    # rather than by the layout, so it is measured at the widths that decide
+    # which of the three is drawn: the floor, a phone, and either side of the
+    # width the full one needs.
+    for width in (32, 40, 72, 80):
+        for asked, mode in ((False, "queueing"), (True, "downloading now")):
+            line = confirm_hints(asked, width)
+            at_most(f"the confirm list {mode} at {width}", len(line), width - 2)
+            check(f"the way out survives {mode} at {width}", "q back" in line, True)
+        # The key that opens dlq's listing is named at every width, because a
+        # key nothing names is a key nobody presses.
+        check(
+            f"the spot key is offered at {width}",
+            "p spot" in confirm_hints(False, width),
+            True,
+        )
+        # And at none of them while the screen says NOW: a download that
+        # starts on enter takes no place in a queue it never waits in.
+        check(
+            f"and not while it says NOW at {width}",
+            "p " in confirm_hints(True, width),
+            False,
+        )
+
+    # -- the spot picked on dlq's listing ------------------------------------ #
+
+    # The row says a place or a number, never both, and the place is counted
+    # among the items it was picked between *plus this one* — the video is not
+    # in that queue yet, which is the whole reason the picker holds a phantom.
+    queued_now = ["10-first.py", "20-a-rather-long-name-for-a-talk.py", "30-last.py"]
+    check(
+        "a spot at the head is the first of one more",
+        spot_said(0, queued_now, 40),
+        "1st of 4",
+    )
+    check(
+        "and anywhere else says what it lands behind",
+        spot_said(1, queued_now, 40),
+        "2nd of 4 (after first)",
+    )
+    # Dropped whole rather than clipped: half a name is a name read as another
+    # item, and the position is the fact this row exists to carry.
+    check(
+        "a neighbour that does not fit is dropped, not cut",
+        spot_said(2, queued_now, 18),
+        "3rd of 4",
+    )
+    for width in (18, 26, 40, 66):
+        at_most(
+            f"the priority row at {width}",
+            len(spot_said(2, queued_now, width)),
+            width,
+        )
+    # A queue that grew or shrank between the picking and the drawing still
+    # draws a row rather than raising in the middle of a redraw.
+    check(
+        "a position past the end still reads",
+        spot_said(9, queued_now, 40),
+        "4th of 4 (after last)",
+    )
+    check("and an empty queue is a first place", spot_said(0, [], 40), "1st of 1")
+    check(
+        "the positions are said the way a person says them",
+        [_ordinal(number) for number in (1, 2, 3, 4, 11, 12, 13, 21, 102)],
+        ["1st", "2nd", "3rd", "4th", "11th", "12th", "13th", "21st", "102nd"],
+    )
 
     # -- the confirmation's two columns never touch -------------------------- #
 
@@ -4507,6 +4779,77 @@ def _self_test() -> int:
 
     check("the queue manager imports back cleanly", expire_sched.ROOT, HERE)
 
+    # -- and dlq's listing, which is the whole of the picker ----------------- #
+
+    # Imported here and not at the top of this module for the reason
+    # `pick_spot` gives: it reads `ytq._addstr` while it loads. By now this
+    # module is built, which is exactly the state a key press is in.
+    import inspect
+
+    import expire_ui
+
+    check(
+        "dlq's listing offers the picker",
+        callable(getattr(expire_ui, "pick_place", None)),
+        True,
+    )
+    check(
+        "and the one rule for taking a place",
+        callable(getattr(expire_ui, "place", None)),
+        True,
+    )
+    # The two arguments this screen names in words. Positions and caps can be
+    # passed either way; these two cannot, and a silent rename over there
+    # would otherwise reach this side as a TypeError under somebody's finger.
+    check(
+        "the picker takes `partial` and `pos` by name",
+        {"partial", "pos"} <= set(inspect.signature(expire_ui.pick_place).parameters),
+        True,
+    )
+
+    # No spot picked asks dlq nothing at all, which is the whole of that
+    # condition — the confirmation keeps no second copy of it.
+    asked: list[tuple[str, int]] = []
+    kept_place = expire_ui.place
+    try:
+        def _placed(name: str, pos: int) -> tuple[str, bool]:
+            asked.append((name, pos))
+            return f"{item_slug(name)} is 3rd of 5", True
+
+        expire_ui.place = _placed
+        check("no spot picked moves nothing", take_spot("30-clip.py", None), None)
+        check("and asks dlq nothing", asked, [])
+        check(
+            "a spot picked is taken, and dlq says where",
+            take_spot("30-clip.py", 2),
+            "clip is 3rd of 5",
+        )
+        # The name written and the position picked, which is all this side
+        # decides: the number that comes out of the position is dlq's.
+        check("with the written name and the position", asked, [("30-clip.py", 2)])
+
+        # A busy queue is a sentence and never an exception, and the item is
+        # written and queued either way — the receipt saying so is built before
+        # this line is asked for and does not depend on its answer.
+        expire_ui.place = lambda name, pos: ("a firing holds the queue", False)
+        check(
+            "a refusal says so and leaves it last",
+            take_spot("30-clip.py", 2),
+            "a firing holds the queue — 30-clip.py is last in the queue",
+        )
+
+        def _broken(name: str, pos: int) -> tuple[str, bool]:
+            raise RuntimeError("the checkout moved")
+
+        expire_ui.place = _broken
+        check(
+            "and a listing that is not there is still a sentence",
+            take_spot("30-clip.py", 2).startswith("30-clip.py kept the place"),
+            True,
+        )
+    finally:
+        expire_ui.place = kept_place
+
     # --list writes nothing, so there would be nothing for --now to run.
     try:
         with contextlib.redirect_stderr(io.StringIO()):
@@ -4523,7 +4866,7 @@ def _self_test() -> int:
 
     # The written item has to survive the runner's own admission check.
     with tempfile.TemporaryDirectory() as raw:
-        keep = (QUEUE, STAGING)
+        keep = (QUEUE, STAGING, DONE, FAILED)
         keep_env = os.environ.get("EXPIRE_HOME")
         os.environ["EXPIRE_HOME"] = raw
         try:
@@ -4535,6 +4878,13 @@ def _self_test() -> int:
                 os.environ["EXPIRE_HOME"] = keep_env
         QUEUE = Path(raw) / "queue"
         STAGING = QUEUE / ".staging"
+        # And the other two directories an item can be in, which the duplicate
+        # checks below write into. They were the real ones — the queue this
+        # phone actually runs — so the checks wrote a talk into somebody's
+        # `done/` on every run, and read whatever was already in it back. Both
+        # halves are the reason the queue is pointed somewhere temporary at all.
+        DONE = Path(raw) / "done"
+        FAILED = Path(raw) / "failed"
         url_used = 'https://x/y?a=1&b="2"'
         try:
             source = render(url_used, "clip", exact, info["title"], "2026-08-01")
@@ -4546,6 +4896,13 @@ def _self_test() -> int:
                 None
                 if shebang_here()
                 else f"shebang interpreter not found: {SHEBANG[2:].strip()!r}"
+            )
+            # The name the picker is handed has to be the name that turns up
+            # in the queue, or the spot is taken for a file nobody wrote.
+            check(
+                "the picker is handed the name that gets written",
+                item_name(40, "clip"),
+                path.name,
             )
             check("the runner would admit it", validate(path), admits)
             check("it is executable", os.access(path, os.X_OK), True)
@@ -4675,7 +5032,7 @@ def _self_test() -> int:
                 True,
             )
         finally:
-            QUEUE, STAGING = keep
+            QUEUE, STAGING, DONE, FAILED = keep
 
     print(f"{passed} passed, {failed} failed")
     return 1 if failed else 0

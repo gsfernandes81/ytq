@@ -38,8 +38,8 @@ Four screens, and `q` or esc always goes back exactly one of them:
 3. **Format list** — pick with ↑↓; enter queues it for tonight, `n` starts it
    now. The cursor opens on whatever you chose last time.
 4. **Confirm** — shows the size and the cap; `e` edits the priority number or
-   file name if you care, `n` and `t` switch between now and tonight, enter
-   commits.
+   file name if you care, `p` picks where in the queue it goes, `n` and `t`
+   switch between now and tonight, enter commits.
 
 Queueing takes you back to the results with a `✓` on the row — on the row you
 were on, so finding three things to download is one search rather than three. A `✓` is also on anything
@@ -86,6 +86,55 @@ finished file appears in the video download directory as `some-talk.mp4`.
 dlq dest video ~/storage/movies   # change it for everything
 ytq --dest ~/storage/dcim <url>    # or for this one only
 ```
+
+## Where it goes in the queue
+
+New videos are queued **last** and downloaded in the order the queue is in, so
+most of the time there is nothing to decide. When there is, `p` on the confirm
+screen opens **dlq's own listing** with this video held in it — the screen
+`dlq` shows, in the held-item mode `m` uses to move a download already in the
+queue — so what it says about tonight's allowance and where the night's
+downloads stop is the queue's own answer and not a second one. ↑↓ move the
+video through the queue, enter takes the place, esc leaves it where it was.
+The two lines under the title are dlq's own reading of tonight, and the rule
+across the middle is where the night's allowance runs out — both move as the
+video does, because a place above that line is a place downloaded tonight.
+
+```
+ moving crust-of-rust-subtyping
+ tonight: waiting, opens 23:00Z (46m)
+ 850 MiB to spend · 1.4 GiB expires 00:00Z
+ queued (4)
+   galaxy-z-flip8-review    -  0 B of ≤310 MiB
+   crust-of-rust-subtyping  -  0 B of ≤534 MiB
+ ── tonight ends here: 844 MiB ────────────
+   rust-lifetimes-explained -  0 B of ≤180 MiB
+   some-talk                -  0 B of ≤95 MiB
+```
+
+The confirm screen then says `priority  2nd of 4 (after galaxy-z-flip8-review)`
+where it showed a number, and the receipt names the place it took:
+
+```
+queued 40-crust-of-rust-subtyping.py — 515 MiB (1080p mp4), cap 534 MiB
+crust-of-rust-subtyping is 2nd of 4
+```
+
+- **A number typed with `e` and a place picked with `p` are the same field
+  answered two ways**, so each clears the other and the row shows whichever is
+  in force. There is never a number beside a place.
+- **The video is written last and moved afterwards**, by dlq and with dlq's own
+  rule, so the number on the file is dlq's to hand out — which is why a wide
+  terminal says `renumbered at the spot` under the name it is written with.
+- **A busy queue refuses the move**, and says so on its own receipt line: a
+  nightly firing or another download holds the queue exclusively while it runs.
+  The video is queued either way and downloads tonight like anything else, and
+  `dlq`'s listing can still move it tomorrow.
+- **`n` takes the place away again.** What downloads now runs from the file
+  that was just written, under the name it was written with, and never waits in
+  the queue at all — so the priority row goes back to being a number.
+- At 32 columns the hint line holds four pairs, and `e edit` is the one it
+  drops. The key still works, and so does everything else this page describes.
 
 ## Searching
 
