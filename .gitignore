@@ -4,3 +4,10 @@ __pycache__/
 # uv-managed dev environment (make dev)
 .venv/
 .pytest_cache/
+
+# mutation testing (make mutants); poodle works in a copy of the tree
+.poodle-temp/
+.poodle-report.json
+
+# hypothesis's example database
+.hypothesis/

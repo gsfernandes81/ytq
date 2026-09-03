@@ -9,16 +9,18 @@
 #
 # Offline: no network, no scheduler. Needs the sibling checkouts (dlq — and
 # zwana-quota, which dlq's runner imports — beside this one or under ~),
-# because the modules import across them the same way a real run does.
+# because the modules import across them the same way a real run does. The
+# suite points EXPIRE_HOME at a throwaway queue root of its own, so running
+# this never touches the real queue.
 #
 # The front ends lay out to the terminal and check every line fits it down to
 # 32 columns, so these fail on a long checkout path — that is the path, not a
 # regression: run them from a shallow clone (~/ytq is what they are built for).
 #
-# The old per-module self-tests were removed on 2026-09-02 to be rebuilt as a
-# pytest suite. Until that suite lands, tests/ is empty and pytest exits 5
-# ("no tests collected") — which is reported here as "no tests yet" and passed,
-# so the interim commits are pushable. The suite tightens this.
+# An empty collection is a failure, not a pass. pytest exits 5 when it finds
+# no tests at all, and that is exactly what a suite deleted, renamed out of
+# discovery or broken at import looks like — a green gate that ran nothing.
+# It was passed while the suite was being rebuilt (2026-09-02); it is not now.
 set -u
 
 cd "$(git rev-parse --show-toplevel)" || exit 1
@@ -31,7 +33,6 @@ fi
 rc=$?
 
 if [ "$rc" -eq 5 ]; then
-    echo "checks: no tests yet — nothing was collected."
-    exit 0
+    echo "checks: pytest collected no tests at all — that is the failure." >&2
 fi
 exit $rc

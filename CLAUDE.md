@@ -121,27 +121,111 @@ Decisions that travel with this code:
 `make test` (pytest) = `make check` (`.githooks/checks.sh`, the one copy; the
 pre-push hook runs it). Offline: nothing reaches YouTube or the portal. Needs
 the sibling checkouts, and a shallow clone path — a deep worktree is itself
-the width the screens cannot fit.
+the width the screens cannot fit. `make mutants` is the separate, slower
+question below, and is deliberately not part of either.
 
-**There are no tests right now.** `ytq.py --self-test` and `ytdl_item.py
---self-test` were deleted outright on 2026-09-02 — the functions, the flags,
-the pytest shim over them and the completion entry — so that the whole thing
-can be rebuilt as a real pytest suite under `tests/`. Until that lands
-`checks.sh` reads pytest's exit 5 as "no tests yet" and passes, which is what
-keeps the interim commits pushable; the suite tightens it.
+`tests/conftest.py` is the hermetic half and the only place that knows the
+environment. `ytq` anchors `HERE`/`QUEUE`/`DONE`/`FAILED` at **import time**,
+so the pointing has to happen before the first `import ytq` anywhere: it
+builds a throwaway queue root in a temp directory, **copies** dlq's modules
+into it (copies and not symlinks — `expire_runner` anchors its own root on
+`Path(__file__).resolve().parent`, and a symlink resolves back to the real
+checkout and its `config.json`), and points `EXPIRE_HOME`, `ZWANA_HOME` and
+`$HOME` at temp directories. `$YTQ_TEST_DLQ` overrides where the real dlq is
+found, which is what lets the mutation runner work in a copied tree with no
+sibling beside it. An autouse fixture empties the root between tests.
 
-Two helpers went with them, because nothing but a check ever called either:
-`shebang_here` (whether the interpreter every item names exists here, which is
-how a check asking the runner for a verdict knew to expect that one objection
-off Termux) and `json_leaks` (`null`/`true`/`false` left in a written item —
-valid Python *names*, so the item compiles and fails only on the night it was
-queued for). Both are worth having back in some form when the suite is
-written.
+The eight files, and what each is for:
 
-What the suite has to cover: the byte metering `ytdl_item` does over the file
-layouts yt-dlp really produces — the merge case above all, where a double
-count stops the item mid-merge every night for ever — the cost-shaped argv
-(`search_argv`'s `--flat-playlist`, `subs_argv`'s `--playlist-end`), the
-duplicate refusal `write_item` is the one door for, `viewport` restoring a
-place on a list that grew or shrank, and every line of both screens fitting
-the terminal down to 32 columns.
+- `test_item_bytes.py` — the metering. The merge case above all: a rename is
+  not new bytes, two names for one stream are one high-water mark, the freeze
+  holds the *last* figure, and a property says the count can never go down
+  however the files move about.
+- `test_item_firing.py` — one firing: the resuming argv, `time_left` on an
+  endless deadline, which file was produced and where it goes, and the whole
+  decision table (a slice too small to extract in, no time left, already
+  delivered, finished, exit 0 with nothing to show, the zero-firing strikes).
+  The poll loop runs on a **fake clock** (`Clock`) and a fake child, so the
+  budget stop, the deadline stop and the postprocessing lift are deterministic
+  and instant.
+- `test_asking.py` — what is asked for and what is said before asking:
+  `--flat-playlist`, `--playlist-end`, the four ways `ask` fails, the feed's
+  price being the total, `next_page`'s two different sentences, the cookie
+  states, and the ages that mark themselves approximate.
+- `test_formats.py` — what is offered and at what cap: unsized formats hidden
+  and counted, storyboards dropped, merges paired by container family, the
+  3%/12% margin, `withheld` scoped to YouTube and never conflated with
+  `choices`'s `unsized`, and where the cursor opens.
+- `test_queue_items.py` — the one door. The item the runner has to be able to
+  read (asked of `expire_runner.parse_item`), the duplicate refusal keyed on
+  id and the weaker fallback on name, two-digit names, and the picker's
+  write-then-place path with `expire_ui.place` stubbed — the stub checks the
+  file is on disk *before* dlq is asked to move it.
+- `test_layout.py` — the widths, 32 columns up, as properties: every hint set
+  in its stated room, every row inside the terminal, `viewport` always handing
+  back a place the screen draws, `message_body` never growing past its own way
+  out, and the marquee filling its room exactly.
+- `test_cli.py` — the paths with no terminal: the flag combinations that are
+  refused, `--list --from-json` printing and writing nothing, the feed
+  refusing without a cookie, and the receipts printed after curses is gone.
+- `test_screens.py` — the curses screens under a pty, read back with `pyte`.
+  Marked `tui`. Structure only — which screen is up, that a row for a video
+  exists, that the hint line still names a way out — never whole-line
+  literals. Arrows go as `\x1bOA`/`\x1bOB` because keypad mode is on. It
+  drives what costs nothing: the entry field, the cookie refusal, a listing
+  and a format list from a saved dump, the confirmation, and the whole road
+  from a dump to a written item. **The idle-screen property is here**: a
+  screen of short titles emits zero bytes over two seconds and one with a
+  title too long for its room does not.
+
+Two helpers deleted with the old self-tests are back as tests rather than as
+code: the shebang question (`test_the_runner_admits_what_ytq_writes` expects
+exactly one objection off Termux, where the item's interpreter is not on disk)
+and the json leak (`null`/`true`/`false` are valid Python *names*, so an item
+holding one compiles and fails only on the night it was queued for).
+
+### Mutation testing — `make mutants`
+
+`uv run --group mutants poodle` (an optional group: a plain `uv sync` does not
+install it). It changes one operator, literal or comparison at a time and
+re-runs the suite; a mutant that **survives** is a line nothing was actually
+asserting anything about. The score is a **ratchet, not a gate** — some
+mutants cannot be killed by any test worth having, so 100% is not a target and
+`--fail_under 50` is there to catch a suite going backwards. `poodle_config.py`
+carries the reasons for every setting; the two that matter are
+`source_folders = ["."]` (the modules are at the root, not under `src/`) and
+the copy filters (poodle copies the tree per worker — and carries every
+module's bytecode but the two being mutated, which halves the run).
+
+**3133 mutants, 53.3% killed** (2026-09-03, ~65 minutes on four cores). Read
+the survivor list with that number in mind: the four groups below are most of
+it, and none of them is a behaviour nobody pinned — they are behaviour pinned
+somewhere this run cannot see, or wording and constants that only a brittle
+test could hold down. What is left over is where the next test goes.
+
+- **the screens** (~535). `duplicate_screen`, `entry`, `message`, `app`,
+  `pick`, `confirm`, `results` and the printing paths are covered by
+  `test_screens.py` and `test_cli.py`, but the mutation command excludes the
+  `tui` mark for runtime, so nothing in the run is there to kill them.
+- **prose** (427 String mutants). poodle rewrites `"queued"` as
+  `"XXqueuedXX"`, which every `in` assertion still passes. Killing those needs
+  exact-equality assertions on wording, which is the brittleness this suite is
+  written to avoid.
+- **numbers read through their own constant** (a large share of 450). A test
+  that asks `cost_band(NIGHT_BYTES)` moves with a mutated `NIGHT_BYTES`;
+  pinning it would mean writing the byte count out by hand in the test.
+- **equivalent** — e.g. `ceiling = max(budget // 2, budget - guard)`, whose
+  first arm is unreachable while `MIN_USEFUL_SLICE` is eight times
+  `GUARD_FLOOR`, and `state.pop("zero_firings", None)` whose default is never
+  returned.
+
+The curses event loops in `ytq.py` are fenced with `# nomut: start` /
+`# nomut: end`, and that is the only thing in the code that exists for the
+mutation run: a mutant inside one does not fail a test, it hangs a terminal
+until the timeout kills it. Those loops are checked under a pty instead, which
+is also why the mutation command skips the `tui` mark — that code is not
+mutated and those tests are most of the suite's wall clock.
+
+**A surviving mutant is a question, not a failure.** Read it: either it names
+a behaviour nobody pinned, and the answer is a test, or it is equivalent, and
+the answer is to say so.

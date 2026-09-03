@@ -2223,6 +2223,9 @@ def text_input(win, y: int, x: int, initial: str = "", width: int = 60) -> str |
     buffer = list(initial)
     curses.curs_set(1)
     try:
+        # nomut: start — a mutant inside a curses event loop does not fail a
+        # test, it hangs a terminal until the runner's timeout kills it. What
+        # these loops do is checked under a pty instead (tests/test_screens.py).
         while True:
             shown = "".join(buffer)[-width:]
             _addstr(win, y, x, shown + " " * (width - len(shown)), curses.A_UNDERLINE)
@@ -2240,6 +2243,7 @@ def text_input(win, y: int, x: int, initial: str = "", width: int = 60) -> str |
                 buffer.clear()
             elif 32 <= key < 127:
                 buffer.append(chr(key))
+        # nomut: end
     finally:
         curses.curs_set(0)
 
@@ -2268,6 +2272,9 @@ def spinner_while(win, message: str, work) -> tuple[object, Exception | None]:
     frames = "|/-\\"
     tick = 0
     try:
+        # nomut: start — a mutant inside a curses event loop does not fail a
+        # test, it hangs a terminal until the runner's timeout kills it. What
+        # these loops do is checked under a pty instead (tests/test_screens.py).
         while thread.is_alive():
             height, width = win.getmaxyx()
             note = (
@@ -2296,6 +2303,7 @@ def spinner_while(win, message: str, work) -> tuple[object, Exception | None]:
             time.sleep(0.12)
             if win.getch() == 27:
                 break
+        # nomut: end
     finally:
         win.nodelay(False)
     thread.join(timeout=1)
@@ -2326,6 +2334,9 @@ def pick(
     cursor = max(0, min(start, len(options) - 1))
     flash: str | None = None
 
+    # nomut: start — a mutant inside a curses event loop does not fail a
+    # test, it hangs a terminal until the runner's timeout kills it. What
+    # these loops do is checked under a pty instead (tests/test_screens.py).
     while True:
         win.erase()
         height, width = win.getmaxyx()
@@ -2451,6 +2462,7 @@ def pick(
             return options[cursor], False
         elif key in (curses.KEY_ENTER, 10, 13):
             return options[cursor], now_default
+    # nomut: end
 
 
 def _ordinal(number: int) -> str:
@@ -2595,6 +2607,9 @@ def confirm(
     where = landing(dest)
     field = 0
 
+    # nomut: start — a mutant inside a curses event loop does not fail a
+    # test, it hangs a terminal until the runner's timeout kills it. What
+    # these loops do is checked under a pty instead (tests/test_screens.py).
     while True:
         win.erase()
         height, width = win.getmaxyx()
@@ -2765,6 +2780,7 @@ def confirm(
                 typed = text_input(win, 7, gutter, slug, min(48, room))
                 if typed:
                     slug = slugify(typed)
+    # nomut: end
 
 
 def already_queued(hits: list[Result]) -> set[int]:
@@ -2977,6 +2993,9 @@ def results(
     tick = 0
     ticking_for = -1
 
+    # nomut: start — a mutant inside a curses event loop does not fail a
+    # test, it hangs a terminal until the runner's timeout kills it. What
+    # these loops do is checked under a pty instead (tests/test_screens.py).
     while True:
         win.erase()
         height, width = win.getmaxyx()
@@ -3113,6 +3132,7 @@ def results(
             cursor = len(hits) - 1
         elif key in (curses.KEY_ENTER, 10, 13):
             return cursor, here
+    # nomut: end
 
 
 def watch(win, paint: dict, running: Running) -> None:
@@ -3122,6 +3142,9 @@ def watch(win, paint: dict, running: Running) -> None:
     the moment it starts is worse than one that never went to the background at
     all. ``q`` leaves it running.
     """
+    # nomut: start — a mutant inside a curses event loop does not fail a
+    # test, it hangs a terminal until the runner's timeout kills it. What
+    # these loops do is checked under a pty instead (tests/test_screens.py).
     while True:
         win.erase()
         height, width = win.getmaxyx()
@@ -3163,6 +3186,7 @@ def watch(win, paint: dict, running: Running) -> None:
             running.stop()
         elif key in (ord("q"), 27):
             return
+    # nomut: end
 
 
 def app(
@@ -3257,6 +3281,9 @@ def app(
     elif first:
         query, screen = first, "search"
 
+    # nomut: start — a mutant inside a curses event loop does not fail a
+    # test, it hangs a terminal until the runner's timeout kills it. What
+    # these loops do is checked under a pty instead (tests/test_screens.py).
     while True:
         if screen == "entry":
             text = entry(win, paint, typed)
@@ -3509,6 +3536,7 @@ def app(
                 return receipts
             else:
                 return receipts
+    # nomut: end
 
 
 def _start_or_say_why(win, running: Running, path: Path, choice: Choice) -> str | None:
