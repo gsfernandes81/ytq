@@ -523,3 +523,113 @@ def test_the_version_is_free_to_ask_for_and_says_nothing_when_absent(
 
     monkeypatch.setattr(ytq.subprocess, "run", explode)
     assert ytq.tool_version("yt-dlp") == ""
+
+
+# --------------------------------------------------------------------------- #
+# Open when done: held in memory by the screen that started the download
+# --------------------------------------------------------------------------- #
+
+
+class _Exited:
+    """A child that has already exited, however it went."""
+
+    pid = 2**22 + 1  # no such process: stop()'s killpg is a quiet no-op
+
+    def wait(self):
+        return 0
+
+    def poll(self):
+        return 0
+
+
+def _state(items):
+    (ytq.HERE / "state.json").write_text(json.dumps({"items": items}))
+
+
+def _settled(monkeypatch, asked=True, stop=False, replaced=False):
+    opened = []
+    monkeypatch.setattr(ytq, "open_file", lambda path: opened.append(path) or "opened")
+    running = ytq.Running()
+    child = _Exited()
+    running.child, running.name = child, "10-talk.py"
+    running.open_when_done = asked
+    if stop:
+        running.stop()
+    if replaced:
+        running.child = _Exited()
+    running.settle(child, "10-talk.py")
+    return running, opened
+
+
+def test_the_file_a_finished_run_delivered_is_the_largest_one_there(tmp_path):
+    small, large = tmp_path / "a.srt", tmp_path / "a.mp4"
+    small.write_bytes(b"x")
+    large.write_bytes(b"x" * 100)
+    assert ytq.delivered_file("10-talk.py") is None  # no state at all
+    _state({"10-talk.py": {"delivered": [str(large)]}})
+    assert ytq.delivered_file("10-talk.py") is None  # not retired: not done
+    _state({"10-talk.py": {"retired": "done",
+                           "delivered": [str(small), str(large), str(tmp_path / "gone")]}})
+    assert ytq.delivered_file("10-talk.py") == large
+    # A record left by an earlier item of the same name, with this one still
+    # queued: not this run's delivery.
+    ytq.QUEUE.mkdir(parents=True, exist_ok=True)
+    (ytq.QUEUE / "10-talk.py").write_text("# EXPIRE: v1\n")
+    assert ytq.delivered_file("10-talk.py") is None
+
+
+def test_a_run_that_delivers_opens_what_it_delivered_when_asked(monkeypatch, tmp_path):
+    film = tmp_path / "talk.mp4"
+    film.write_bytes(b"x")
+    _state({"10-talk.py": {"retired": "done", "delivered": [str(film)]}})
+    running, opened = _settled(monkeypatch)
+    assert opened == [film] and running.opened and running.settled
+    # Not asked, stopped (which is not done), or no longer the run on the
+    # screen: nothing is opened.
+    for kwargs in ({"asked": False}, {"stop": True}, {"replaced": True}):
+        assert _settled(monkeypatch, **kwargs)[1] == []
+
+
+def test_a_stopped_run_cannot_be_asked_again_on_its_way_down(monkeypatch):
+    """``x`` then ``o`` while the child is still unwinding must not re-arm
+    the ask: whatever it delivers as it goes, it was told to stop."""
+
+    class Unwinding(_Exited):
+        def poll(self):
+            return None
+
+    running = ytq.Running()
+    running.child, running.name = Unwinding(), "10-talk.py"
+    assert running.askable
+    on, off = running.toggle_open(), running.toggle_open()
+    assert on != off and not running.open_when_done
+    running.stop()
+    assert running.alive and not running.askable
+
+
+def test_a_run_that_stops_short_opens_nothing_and_says_so(monkeypatch):
+    """The item stays queued; the run that finishes it later is another run,
+    and nothing it delivers is opened on this one's ask."""
+    _state({"10-talk.py": {"attempts": 0, "part_bytes": 1234}})
+    running, opened = _settled(monkeypatch)
+    assert opened == [] and running.opened and running.settled
+
+
+def test_a_new_download_starts_without_the_last_ones_ask(monkeypatch):
+    monkeypatch.setattr(ytq, "start_now", lambda name: (_Exited(), None))
+    running = ytq.Running()
+    running.open_when_done = True
+    running.start("20-next.py")
+    assert running.open_when_done is False
+
+
+def test_opening_never_raises(monkeypatch, tmp_path):
+    target = tmp_path / "talk.mp4"
+    monkeypatch.setattr(ytq.shutil, "which", lambda name: None)
+    assert "talk.mp4" in ytq.open_file(target)
+    monkeypatch.setattr(ytq.shutil, "which", lambda name: "/bin/false")
+    monkeypatch.setattr(
+        ytq.subprocess, "run",
+        lambda *a, **kw: (_ for _ in ()).throw(OSError("no such opener")),
+    )
+    assert "talk.mp4" in ytq.open_file(target)

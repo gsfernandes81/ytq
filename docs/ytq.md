@@ -326,6 +326,14 @@ bottom, and you can carry on queueing. `x` stops it — what has downloaded stay
 on disk and the item stays queued, so the nightly window carries on from where
 you stopped. Leaving `ytq` leaves the download running.
 
+From a pasted URL there is no list to go back to, so ytq stays on the download
+instead. There `o` asks for the file to be **opened when it is done** — handed
+to Android with `termux-open` the moment this run delivers it — and pressed
+again stops asking. The ask lives in ytq and nowhere else: close ytq and it is
+gone, and a download that is stopped or stops short never opens anything, not
+even when a later run finishes it. `dlq`'s item screen offers the same key for
+a download it started itself.
+
 Only one at a time: the queue takes an exclusive lock, so asking for a second
 while one is going says so and leaves the second queued. It still writes the
 queue item first either way, so it shows up in `dlq list`, and

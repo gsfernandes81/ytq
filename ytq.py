@@ -191,7 +191,8 @@ HINTS = {
     # this is the only place ytq gives it a name.
     "queue": "⏎ queue  e edit  p spot  n now  q back",
     "now": "⏎ start PAID  e edit  t queue  q back",
-    "watch": "x stop  q back",
+    "watch": "x stop  o open when done  q back",
+    "watch-over": "q back",
 }
 
 #: And below 40 there are only 30 of them, so a second and shorter set rather
@@ -216,7 +217,8 @@ TIGHT_HINTS = {
     # else here fits a fifth pair into 30 columns.
     "queue": "⏎ queue  p spot  n now  q back",
     "now": "⏎ start PAID  t queue  q back",
-    "watch": "x stop  q back",
+    "watch": "x stop  o open at end  q back",
+    "watch-over": "q back",
 }
 
 
@@ -1865,21 +1867,127 @@ def progress_line(name: str, report: tuple[int, int] | None, width: int) -> str:
     return fit(f"↓ {stem}  {body}" if width >= WIDE else f"↓ {body}", width - 1)
 
 
+def delivered_file(name: str) -> Path | None:
+    """The file a finished run of *name* delivered, largest first, or ``None``.
+
+    Asked of the runner's ``state.json`` rather than of the disk: a download
+    handed to a shared folder cannot be found by looking, and ``retired`` is
+    the runner's own word that this item finished — a run that stopped short
+    leaves the item queued and answers ``None`` here.
+
+    And the item must have left the queue: records outlive their items, so an
+    earlier item of the same name that finished last week is a ``done`` record
+    this run did not write.
+    """
+    if (QUEUE / name).exists():
+        return None
+    try:
+        state = json.loads((HERE / "state.json").read_text(encoding="utf-8"))
+        record = state["items"][name]
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    if not isinstance(record, dict) or record.get("retired") != "done":
+        return None
+    found = []
+    for spelled in record.get("delivered") or []:
+        path = Path(str(spelled))
+        with contextlib.suppress(OSError):
+            if path.is_file():
+                found.append((path.stat().st_size, path))
+    return max(found)[1] if found else None
+
+
+def open_file(path: Path) -> str:
+    """Hand *path* to Android (or a desktop) to open, and say how it went.
+
+    Never raises and never writes to the terminal: it runs off a thread while
+    curses owns the screen, after a download that has already succeeded.
+    """
+    for opener in ("termux-open", "xdg-open"):
+        if shutil.which(opener) is None:
+            continue
+        try:
+            code = subprocess.run(
+                [opener, str(path)], timeout=60, capture_output=True
+            ).returncode
+        except (OSError, subprocess.SubprocessError) as exc:
+            return f"could not open {path.name}: {exc}"
+        return f"opened {path.name}" if code == 0 else f"could not open {path.name}"
+    return f"no termux-open to open {path.name}"
+
+
 class Running:
-    """The background download this session started, if it started one."""
+    """The background download this session started, if it started one.
+
+    It also holds the one thing about that download that lives nowhere else:
+    whether to open the file when it is done (``o`` on a screen showing it).
+    In memory and nowhere else, on purpose — the ask belongs to this run,
+    watched from this screen. Close the screen and it is gone; a run that is
+    stopped, or stops short, never opens anything, and nor does the later run
+    that finishes the job.
+    """
 
     def __init__(self) -> None:
         self.child: subprocess.Popen | None = None
         self.name = ""
         self.log: Path | None = None
+        self.open_when_done = False
+        #: Set by :meth:`stop`: a run told to stop is never opened, whatever
+        #: it manages to deliver on its way down.
+        self.stopped = False
+        #: What opening the file came to, for a screen to say; ``""`` until then.
+        self.opened = ""
+        #: Whether :meth:`settle` has finished with the child, so a screen
+        #: waiting to say what ``opened`` came to knows when to stop waking.
+        self.settled = True
 
     @property
     def alive(self) -> bool:
         return self.child is not None and self.child.poll() is None
 
+    @property
+    def askable(self) -> bool:
+        """Whether ``o`` means anything now: running, and not told to stop."""
+        return self.alive and not self.stopped
+
     def start(self, name: str) -> None:
         self.child, self.log = start_now(name)
         self.name = name
+        self.open_when_done = False
+        self.stopped = False
+        self.opened = ""
+        self.settled = False
+        # A daemon, so it goes with the front end: an ask outlives neither.
+        threading.Thread(
+            target=self.settle, args=(self.child, name), daemon=True
+        ).start()
+
+    def toggle_open(self) -> str:
+        """Flip the ask, and say what is now true — for a screen to flash."""
+        self.open_when_done = not self.open_when_done
+        return (
+            "it will open when it is done"
+            if self.open_when_done
+            else "it will not open when done"
+        )
+
+    def settle(self, child: subprocess.Popen, name: str) -> None:
+        """Wait out *child*, then open what it delivered if that was asked.
+
+        Keyed on the child and not on ``self``: a newer download replacing
+        this one must not have its ask answered by the older one ending.
+        """
+        child.wait()
+        if child is not self.child:
+            return
+        if self.open_when_done and not self.stopped:
+            path = delivered_file(name)
+            self.opened = (
+                open_file(path)
+                if path is not None
+                else "it did not finish, so nothing was opened"
+            )
+        self.settled = True
 
     def stop(self) -> None:
         """Signal the whole group, which is what ctrl-c used to do.
@@ -1890,6 +1998,8 @@ class Running:
         """
         if self.child is None:
             return
+        # Stopped is not done, and resuming later is a different run.
+        self.stopped = True
         with contextlib.suppress(OSError):
             os.killpg(os.getpgid(self.child.pid), signal.SIGTERM)
 
@@ -3200,6 +3310,9 @@ def watch(win, paint: dict, running: Running) -> None:
     while True:
         win.erase()
         height, width = win.getmaxyx()
+        # `o` only while the bytes move and nobody has said stop: never a key
+        # drawn in the hints that does nothing.
+        offered = running.askable
         _addstr(
             win,
             0,
@@ -3219,23 +3332,33 @@ def watch(win, paint: dict, running: Running) -> None:
                 else "no longer running",
                 curses.A_BOLD,
             )
+        if running.opened or (offered and running.open_when_done):
+            said = running.opened or "opens when done"
+            _addstr(win, 3, 2, fit(said, width - 3))
         _addstr(
             win,
             height - 2,
             1,
-            hint("watch", width)
+            hint("watch" if offered else "watch-over", width)
             if width < WIDE
-            else "x stop it   q leave it running and go back",
+            else (
+                "x stop it   o open when done   q leave it running and go back"
+                if offered
+                else "q go back"
+            ),
             curses.A_DIM,
         )
         win.refresh()
-        win.timeout(500 if running.alive else -1)
+        win.timeout(500 if running.alive or not running.settled else -1)
         try:
             key = win.getch()
         finally:
             win.timeout(-1)
         if key == ord("x"):
             running.stop()
+        elif key == ord("o") and offered:
+            # Said by the line under the progress, which stays.
+            running.toggle_open()
         elif key in (ord("q"), 27):
             return
     # nomut: end
