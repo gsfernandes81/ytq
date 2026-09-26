@@ -30,7 +30,7 @@ Four screens, and `q` or esc always goes back exactly one of them:
    field rather than three. What each costs is printed underneath before you
    spend it.
 2. **Results** — 20 hits (or the newest 30 from the feed) with the channel, the
-   age and the length; ↑↓ to move, ←→ (or page up/down) to jump a screenful,
+   age, the length and the views; ↑↓ to move, ←→ (or page up/down) to jump a screenful,
    enter to see the formats, `/` to search again with your words still there —
    or, on the feed, `r` to read it again. **It keeps your place**: queueing a
    video, backing out of the format list, a deeper look and `r` all put you
@@ -146,18 +146,23 @@ downloaded until you pick a format and commit.
  search: crust of rust
  20 results  ·  ~ approx dates
  Crust of Rust: Lifetime Annotations
-   Jon Gjengset · ~5y · 90m34s
+   Jon Gjengset · ~5y · 90m34s · 312K
  ✓ Rust Lifetimes Finally Explained
-   Let's Get Rusty · ~2y · 26m01s
+   Let's Get Rusty · ~2y · 26m01s · 1.4M
 ```
 
 - **The age is approximate, and says so.** YouTube's search page gives a
   rounded phrase ("4 months ago"), not a date, so `ytq` shows `~4mo` rather
   than inventing a day. `<1d` is anything posted today; `?` means the answer
   came back with no date at all, which happens.
+- **The views are shortened the way YouTube does it**: `842`, `1.2K`, `34M`,
+  `1.1B` — one decimal under ten, truncated rather than rounded, so a count is
+  never shown as more than it is. A result that came back without one shows
+  nothing there rather than a `?`.
 - The channel is the column that gets shortened when there is no room. The
   length and the age are never dropped — a 90-minute video and a 3-minute one
-  are not the same choice.
+  are not the same choice. The views go next, whole and never clipped, when a
+  phone-width row has no room left for them.
 - `✓` marks what this session has already queued.
 - Getting the words wrong costs the search again, so `/` reopens the field with
   what you typed still in it; fixing a typo is an edit, not a retype. Repeating

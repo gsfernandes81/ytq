@@ -13,9 +13,10 @@ number in the item is then a measurement with a stated overhead margin, not an
 estimate.
 
 It also searches. One flat search is a single request (~0.1 MB) that answers
-with a title, a channel, a length and an approximate age per result; picking one
-probes it exactly as a pasted URL would. The entry field takes either, and tells
-them apart by looking, so there is one box rather than two.
+with a title, a channel, a length, an approximate age and a view count per
+result; picking one probes it exactly as a pasted URL would. The entry field
+takes either, and tells them apart by looking, so there is one box rather than
+two.
 
 And it browses the subscription feed, which is the same list of the same things
 and so is the same screen: ``subs`` in that one field asks YouTube for the
@@ -428,6 +429,7 @@ class Result:
         timestamp: int | None,
         live: bool = False,
         key: str = "",
+        views: int | None = None,
     ) -> None:
         self.title = title
         self.channel = channel
@@ -435,6 +437,7 @@ class Result:
         self.duration = duration
         self.timestamp = timestamp
         self.live = live
+        self.views = views
         #: What :func:`find_duplicate` recognises this by, so the list can mark
         #: what is already queued *before* anything is spent probing it.
         self.key = key
@@ -500,6 +503,7 @@ def entries(info: dict) -> list[Result]:
             continue
         duration = raw.get("duration")
         timestamp = raw.get("timestamp") or raw.get("release_timestamp")
+        view_count = raw.get("view_count")
         out.append(
             Result(
                 title=(raw.get("title") or "(untitled)").strip() or "(untitled)",
@@ -511,6 +515,12 @@ def entries(info: dict) -> list[Result]:
                 else None,
                 live=raw.get("live_status") in ("is_live", "is_upcoming"),
                 key=source_key(raw),
+                # bool is an int to isinstance, and True is not a view count.
+                views=int(view_count)
+                if isinstance(view_count, (int, float))
+                and not isinstance(view_count, bool)
+                and math.isfinite(view_count)
+                else None,
             )
         )
     return out
@@ -921,6 +931,32 @@ def clock(seconds: int | None, live: bool = False) -> str:
     if not isinstance(seconds, (int, float)) or seconds <= 0:
         return "?"
     return f"{int(seconds) // 60}m{int(seconds) % 60:02d}s"
+
+
+#: The steps :func:`views` names, largest first.
+VIEW_UNITS = ((10**9, "B"), (10**6, "M"), (10**3, "K"))
+
+
+def views(count: int | None) -> str:
+    """A view count the way YouTube shortens it: ``842``, ``1.2K``, ``34M``.
+
+    One decimal below ten of a unit and none from there up, and truncated
+    rather than rounded, as YouTube does — so ``999_999`` is ``999K`` and
+    never ``1000K``, and no count is ever shown as more than it is.
+
+    Empty rather than ``?`` when there is no count: the feed and the search
+    page leave it out now and then, and a row of question marks would be
+    shouting about the fact the list cares least about.
+    """
+    if not isinstance(count, int) or isinstance(count, bool) or count < 0:
+        return ""
+    for size, unit in VIEW_UNITS:
+        if count >= size:
+            whole, rest = divmod(count, size)
+            if whole < 10:
+                return f"{whole}.{rest * 10 // size}{unit}"
+            return f"{whole}{unit}"
+    return str(count)
 
 
 # --------------------------------------------------------------------------- #
@@ -1941,6 +1977,17 @@ def marquee(text: str, width: int, tick: int) -> str:
     return (loop + loop)[offset : offset + width]
 
 
+def wide_tail(result: Result) -> str:
+    """The columns after the title on a :data:`WIDE` row: channel, age,
+    length, views. Spelled once, because :func:`title_room` measures it and
+    :func:`result_row` draws it, and the two must not disagree by a column."""
+    return (
+        f"{fit(result.channel or '?', 16):<16}  "
+        f"{age(result.timestamp):>5}  {clock(result.duration, result.live):>7}"
+        f"  {views(result.views):>4}"
+    )
+
+
 def title_room(result: Result, width: int) -> int:
     """The columns a result's title gets on the row that draws it.
 
@@ -1952,11 +1999,7 @@ def title_room(result: Result, width: int) -> int:
     for ever.
     """
     if width >= WIDE:
-        tail = (
-            f"{fit(result.channel or '?', 16):<16}  "
-            f"{age(result.timestamp):>5}  {clock(result.duration, result.live):>7}"
-        )
-        return max(8, width - 5 - len(tail))
+        return max(8, width - 5 - len(wide_tail(result)))
     # Two columns for the mark, one in hand at the right — the same arithmetic
     # the narrow branch of `result_row` lays out with.
     return max(4, width - 1 - 2)
@@ -2100,15 +2143,16 @@ def result_row(
 ) -> list[str]:
     """One search hit, as the one or two lines there is room for.
 
-    Four facts and a 40-column phone do not share a line without mutilating the
+    Five facts and a 40-column phone do not share a line without mutilating the
     title, and the title is the one a choice is actually made from — so below
     :data:`WIDE` the title gets a line of its own and everything else sits
     under it.
 
     The tail is composed before the channel is fitted into what is left, rather
-    than clipping the finished line: clipping would drop the length and the age,
-    which are two of the four things this screen exists to say. The channel is
-    the one that can afford to lose its end.
+    than clipping the finished line: clipping would drop the length and the
+    age, which are two of the five things this screen exists to say. The
+    channel is the one that can afford to lose its end; the views are next,
+    and go whole or not at all.
 
     *tick* is the scroll step for a title too long for its room, and ``None``
     is "do not move" — which is every row but the one under the cursor, and
@@ -2119,6 +2163,7 @@ def result_row(
     """
     when = age(result.timestamp)
     long = clock(result.duration, result.live)
+    seen = views(result.views)
     channel = result.channel or "?"
     mark = "✓" if queued else " "
     room = title_room(result, width)
@@ -2127,7 +2172,7 @@ def result_row(
     )
 
     if width >= WIDE:
-        tail = f"{fit(channel, 16):<16}  {when:>5}  {long:>7}"
+        tail = wide_tail(result)
         # mark, a space, the title, two spaces, the tail — and one column in
         # hand, because a line drawn into the last cell is a wrapped line.
         return [f"{mark} {title:<{room}}  {tail}"[: width - 1]]
@@ -2136,6 +2181,13 @@ def result_row(
     # result does not shift its title one to the right of its neighbours'.
     prefix = "✓ " if queued else "  "
     tail = f"{when} · {long}"
+    # Right of the length, as on the wide row; left out rather than left
+    # blank when there is no count, since this line is a sentence, not columns.
+    # Also left out when it would not fit beside the narrowest channel: the
+    # line's end is what gets clipped, and "34M" clipped to "34" is a count
+    # shown as a millionth of itself.
+    if seen and len(tail) + len(seen) + 3 <= width - 10:
+        tail += f" · {seen}"
     # The channel's room, not the title's — a different line and a different
     # sum, named apart so the two cannot be confused for one another.
     channel_room = max(3, width - 7 - len(tail))

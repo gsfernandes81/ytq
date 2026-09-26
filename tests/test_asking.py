@@ -121,6 +121,46 @@ def test_channels_and_playlists_are_dropped_from_a_search(monkeypatch):
     assert "a" in found[0].url
 
 
+def test_an_entry_carries_its_view_count_when_there_is_one():
+    found = ytq.entries({"entries": [
+        {"id": "a", "title": "a", "view_count": 1234},
+        {"id": "b", "title": "b", "view_count": 5.0},
+        {"id": "c", "title": "c"},
+        {"id": "d", "title": "d", "view_count": "many"},
+        {"id": "e", "title": "e", "view_count": True},
+        {"id": "f", "title": "f", "view_count": float("nan")},
+    ]})
+    assert [hit.views for hit in found] == [1234, 5, None, None, None, None]
+
+
+@pytest.mark.parametrize("count, shown", [
+    (0, "0"),
+    (7, "7"),
+    (999, "999"),
+    (1_000, "1.0K"),
+    (1_234, "1.2K"),
+    (1_299, "1.2K"),
+    (9_999, "9.9K"),
+    (10_000, "10K"),
+    (12_345, "12K"),
+    (999_999, "999K"),
+    (1_000_000, "1.0M"),
+    (1_950_000, "1.9M"),
+    (34_567_890, "34M"),
+    (1_100_000_000, "1.1B"),
+    (15_000_000_000, "15B"),
+])
+def test_a_view_count_is_shortened_the_way_youtube_does(count, shown):
+    """Truncated and not rounded: ``999_999`` rounded is ``1000K``, a unit the
+    list never uses, and a rounded count is a count shown as more than it is."""
+    assert ytq.views(count) == shown
+
+
+@pytest.mark.parametrize("count", [None, -1, True, "12"])
+def test_no_view_count_is_shown_as_nothing(count):
+    assert ytq.views(count) == ""
+
+
 def test_an_entry_keeps_what_the_duplicate_check_recognises_it_by():
     hit = ytq.entries({"entries": [{"id": "xyz", "ie_key": "Youtube", "title": "t"}]})[0]
     assert hit.key == ytq.source_key({"id": "xyz", "ie_key": "Youtube"})

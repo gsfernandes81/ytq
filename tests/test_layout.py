@@ -24,10 +24,12 @@ LONG_TITLE = (
 )
 
 
-def a_result(title=LONG_TITLE, channel="Jon Gjengset", duration=5434):
+def a_result(title=LONG_TITLE, channel="Jon Gjengset", duration=5434,
+             views=312_456):
     return ytq.Result(
         title=title, channel=channel, url="https://youtu.be/x",
         duration=duration, timestamp=1_700_000_000, key="youtube:x",
+        views=views,
     )
 
 
@@ -129,6 +131,41 @@ def test_the_length_and_the_age_are_never_the_columns_that_go():
         drawn = " ".join(ytq.result_row(result, width))
         assert ytq.clock(result.duration) in drawn
         assert ytq.age(result.timestamp) in drawn
+        assert ytq.views(result.views) in drawn
+
+
+def test_the_views_sit_to_the_right_of_the_length():
+    result = a_result()
+    for width in WIDTHS:
+        drawn = " ".join(ytq.result_row(result, width))
+        assert drawn.index(ytq.views(result.views)) > drawn.index(
+            ytq.clock(result.duration)
+        )
+
+
+def test_a_view_count_is_dropped_whole_and_never_clipped():
+    """At the floor a long length leaves no room for the count beside the
+    narrowest channel, and the clip at the line's end would take its unit
+    letter — ``34M`` read as ``34``. Whole or not at all."""
+    for duration in (59, 5434, 7200, 60_000, 600_000):
+        for count in (7, 1_234, 34_567_890, 15_000_000_000):
+            result = a_result(duration=duration, views=count)
+            shown = ytq.views(count)
+            for width in range(30, ytq.WIDE):
+                line = ytq.result_row(result, width)[1]
+                tail = line.rsplit(" · ", 1)[-1]
+                assert tail in (shown, ytq.clock(duration)), (width, line)
+
+
+def test_a_row_with_no_count_says_nothing_about_it():
+    """Narrow, the tail is a sentence and loses its last clause; wide, it is a
+    column and keeps its width, so the rows above and below still line up."""
+    counted, bare = a_result(), a_result(views=None)
+    narrow = ytq.result_row(bare, 40)[1]
+    assert narrow.endswith(ytq.clock(bare.duration))
+    assert "?" not in narrow
+    assert ytq.title_room(counted, 100) == ytq.title_room(bare, 100)
+    assert len(ytq.result_row(counted, 100)[0]) == len(ytq.result_row(bare, 100)[0])
 
 
 def test_a_phone_gives_the_title_a_line_of_its_own():
