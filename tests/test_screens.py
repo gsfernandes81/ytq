@@ -12,6 +12,7 @@ confirmation from a saved dump, and the whole road from that to a written item.
 from __future__ import annotations
 
 import contextlib
+import json
 import time
 
 import pytest
@@ -34,6 +35,7 @@ def test_the_field_takes_three_things_and_says_what_each_costs(tui):
     session = tui()
     session.wait_for(lambda text: "paste a URL" in text)
     assert "subs" in session.text
+    assert "wl" in session.text
     # Every cost stands there before anything is spent.
     assert session.text.count("MB") >= 3
 
@@ -58,6 +60,48 @@ def test_the_feed_is_refused_before_a_byte_is_spent_on_it(tui):
     # And the way back is a keypress, not a dead end.
     session.send(" ")
     session.wait_for(lambda text: "paste a URL" in text)
+    # Watch Later is the same signed-in page, refused by the same question.
+    session.send("wl" + ENTER)
+    said = session.wait_for(lambda text: "cookie" in text.lower())
+    assert "any key" in said
+    session.send(" ")
+    session.wait_for(lambda text: "paste a URL" in text)
+
+
+def test_watch_later_is_the_same_listing_by_the_same_road(tui, tmp_path):
+    """``wl`` in the field reads the playlist page and lands on the results
+    screen under its own banner. The yt-dlp here is a stand-in module put
+    first on the path — ``ytdl_argv`` prefers ``-m yt_dlp`` — so a real one
+    installed beside the suite is never the one asked."""
+    home = tmp_path / "home"
+    config = home / ".config" / "yt-dlp"
+    config.mkdir(parents=True)
+    jar = config / "cookies.txt"
+    jar.write_text("# Netscape HTTP Cookie File\n")
+    (config / "config").write_text(f"--cookies {jar}\n")
+    fake = tmp_path / "fake" / "yt_dlp"
+    fake.mkdir(parents=True)
+    asked = tmp_path / "asked.json"
+    answer = search_info(["Saved For Tonight", "Also Saved"])
+    (fake / "__init__.py").write_text("")
+    (fake / "__main__.py").write_text(
+        "import json, sys\n"
+        f"open({str(asked)!r}, 'w').write(json.dumps(sys.argv[1:]))\n"
+        f"print(json.dumps({answer!r}))\n"
+    )
+    session = tui(
+        HOME=str(home),
+        XDG_CONFIG_HOME=str(home / ".config"),
+        PYTHONPATH=str(fake.parent),
+    )
+    session.wait_for(lambda text: "paste a URL" in text)
+    session.send("wl" + ENTER)
+    session.wait_for(lambda text: "Saved For Tonight" in text)
+    assert "watch later" in session.screen.display[0]
+    assert "Also Saved" in session.text
+    assert ytq.WL_URL in json.loads(asked.read_text())
+    # And the way out is still named.
+    assert "q" in session.hints
 
 
 def test_a_saved_search_opens_on_the_listing(tui, make_dump):

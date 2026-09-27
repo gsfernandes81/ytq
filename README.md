@@ -1,7 +1,7 @@
 # ytq — search and queue videos for the overnight download queue
 
 A four-screen curses app for the phone: search (or paste a URL, or open the
-subscription feed), results, formats, confirm. What it queues downloads
+subscription feed or Watch Later), results, formats, confirm. What it queues downloads
 overnight through [`dlq`](../dlq), the expiring-quota download queue, on
 allowance that would otherwise be wiped at midnight. `docs/ytq.md` is the
 user guide.

@@ -14,6 +14,7 @@ it somewhere else with `dlq dest video <dir>`.
 ytq                # search, or paste a URL, in the same field
 ytq crust of rust  # straight to the results
 ytq subs           # straight to your subscription feed
+ytq wl             # straight to your Watch Later playlist
 ytq <url>          # straight to the format list
 ytq --now <url>    # open the format list ready to start it now
 ```
@@ -26,13 +27,13 @@ same way.
 Four screens, and `q` or esc always goes back exactly one of them:
 
 1. **Search** — type words to search for, paste a URL, or type `subs` for your
-   subscription feed. It tells the three apart by looking, so there is one
-   field rather than three. What each costs is printed underneath before you
+   subscription feed or `wl` for your Watch Later playlist. It tells them
+   apart by looking, so there is one field rather than four. What each costs is printed underneath before you
    spend it.
-2. **Results** — 20 hits (or the newest 30 from the feed) with the channel, the
+2. **Results** — 20 hits (or the first 30 of the feed or Watch Later) with the channel, the
    age, the length and the views; ↑↓ to move, ←→ (or page up/down) to jump a screenful,
    enter to see the formats, `/` to search again with your words still there —
-   or, on the feed, `r` to read it again. **It keeps your place**: queueing a
+   or, on the feed and Watch Later, `r` to read it again. **It keeps your place**: queueing a
    video, backing out of the format list, a deeper look and `r` all put you
    back where you were rather than at the top.
 3. **Format list** — pick with ↑↓; enter queues it for tonight, `n` starts it
@@ -246,6 +247,39 @@ search hit is.
   decision with a price on it, and a price belongs on a screen somebody is
   looking at.
 
+## Your Watch Later playlist
+
+`wl` in the field — or `watch later`, `ytq wl`, `ytq --wl`, or the playlist's
+own URL, `youtube.com/playlist?list=WL` — reads the first 30 videos of your
+Watch Later playlist onto the same results screen. Everything in the feed
+section above holds for it too, on the same cookie, the same bound and the
+same prices: ↓ at the bottom goes deeper, thirty at a time to 150, and says
+the total first; `r` reads it again; it is cached for the session; `✓` marks
+what the queue already holds. The two lists are read to their own depths, so
+going deeper in one does not re-buy the other.
+
+```
+ watch later
+ 3 videos · just now · the whole list
+ Saved For Tonight
+   Jon Gjengset · ~1d · 10m00s
+```
+
+- **The order is YouTube's.** Whatever the playlist is sorted by there
+  (manual, date added, …) is the order here; ytq does not re-sort it.
+- **The dates are the videos' upload dates**, approximate as everywhere else —
+  not when you added them.
+- **An empty Watch Later says both things it can mean.** Unlike the feed, it
+  can really be empty — but a signed-out session reads the same way, so the
+  screen says both, and how old the jar is.
+- **A video opened *from* Watch Later is that video.** Its URL carries
+  `&list=WL`, and pasting it goes to the format list for that one video; only
+  the `/playlist?list=WL` page itself is read as the list.
+- **Queueing from it does not remove anything from it.** ytq only reads.
+- The 0.2 MB a look is the feed's estimate carried over, not a measurement;
+  a playlist page holds more rows than a feed page, so it may well be less.
+- `ytq --list --wl` prints the first 30 and writes nothing.
+
 ## Reading the format list
 
 ```
@@ -300,6 +334,7 @@ the two columns nobody chooses on — leaving the size, the label and the nights
 ```
 ytq --list <url>            # print the table, write nothing
 ytq --list --subs           # print the subscription feed, write nothing
+ytq --list --wl             # print Watch Later, write nothing
 ytq --from-json dump.json   # reuse a saved 'yt-dlp -J' dump —
                             # changing your mind costs no data
 ```
@@ -403,7 +438,7 @@ both handled in `~/.config/yt-dlp/config` rather than in `ytq`:
   file — mode 600, and never in the repo: it holds live Google session tokens,
   and yt-dlp rewrites it in place as they refresh.
 
-  The same jar is what the **subscription feed** signs in with, and it is the
+  The same jar is what the **subscription feed** (and **Watch Later**) signs in with, and it is the
   louder alarm of the two: a search with stale cookies still returns something,
   where the feed returns nothing at all. So an empty feed and a short format
   list are the same fault, and `ytq` says so on both screens rather than

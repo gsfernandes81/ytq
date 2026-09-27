@@ -31,6 +31,19 @@ Decisions that travel with this code:
   fewer rows back than asked for is the end of the feed, told apart from
   `SUBS_MAX` in words; the depth commits only on a fetch that came back
   (`subs_want` vs `subs_asked`).
+- **Watch Later (`wl`) is the feed's twin, not another screen** (2026-09-27).
+  Everything that differs between the two signed-in lists is one `Feed`
+  (`SUBS`, `WATCH_LATER`, keyed in `FEEDS`): the URL, the banner, the noun,
+  what the end of it is called, and what empty means — `empty_later_advice`
+  says *both* things an empty Watch Later can be, because unlike the feed it
+  can really be empty. `which_feed` routes; `looks_like_feed` is it as a bool,
+  still asked before `looks_like_url`. `WL_PAGE` matches only the
+  `/playlist?list=WL` page — a video opened from the list carries `&list=WL`
+  and is that video. The app's `subs_asked`/`subs_want` are per list, so one
+  list's deeper look never re-buys the other. `later_argv` is pinned beside
+  `subs_argv`; the pty test drives `wl` to a listing through a stand-in
+  `yt_dlp` module on `PYTHONPATH`, which `ytdl_argv` prefers, so a real one is
+  never asked.
 - **The cookie is asked about before anything is spent** — `cookie_state`
   reads yt-dlp's own config with `shlex`, and refuses on a missing
   `--cookies` line or a jar not on disk. **An empty feed is never reported as

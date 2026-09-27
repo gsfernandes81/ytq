@@ -29,6 +29,10 @@ empty. An empty feed is never reported as "nothing new": YouTube answers a
 logged-out feed with no entries rather than with an error, so that answer means
 the cookies have expired and the screen says so.
 
+Watch Later is the other signed-in list, on the same screen by the same road:
+``wl`` in the field reads the first ``SUBS_RESULTS`` of it, in the order the
+playlist keeps, on the same cookie and the same bound.
+
 Usage::
 
     ytq                      # search, or paste a URL into the same field
@@ -37,6 +41,7 @@ Usage::
     ytq <url>                # straight to the format list
     ytq --list <url>         # print the formats, write nothing
     ytq --list --subs        # print the feed, write nothing
+    ytq wl                   # straight to your Watch Later playlist
     ytq --now <url>          # open the format list ready to download now
 
 The item it writes runs yt-dlp per firing (see :mod:`ytdl_item`); it never
@@ -344,6 +349,12 @@ SUBS_TIMEOUT_PER = 4
 #: keyed on the words that produced it. Not a query anybody can type, so it
 #: cannot collide with one.
 SUBS_KEY = ":subs"
+
+#: The Watch Later playlist, the other signed-in list. The playlist URL and not
+#: ``:ytwatchlater``, so the argv reads the same shape as the feed's — and it
+#: is the same kind of page to YouTube: without the cookie there is no list.
+WL_URL = "https://www.youtube.com/playlist?list=WL"
+WL_KEY = ":wl"
 
 #: Where the docs tell you to put the cookie jar, and the config that points at
 #: it. Named here so that the screen saying the feed cannot be read sends
@@ -667,12 +678,12 @@ def cookie_state(paths: list[Path] | None = None) -> tuple[str, str]:
     return "file", f"{tilde(jar)}, written {written(stat.st_mtime)}"
 
 
-#: Why the feed alone needs anything. Its own entry rather than part of
+#: Why the two signed-in lists alone need anything. Its own entry rather than part of
 #: :func:`cookie_fix`, because the two screens that do not need it each say it
 #: better in their own words — the refusal has yt-dlp's line and the empty feed
 #: has a paragraph about what an empty feed is — and a notice has to fit a
 #: phone whole, which is checked.
-COOKIE_WHY = "the feed is a signed-in page — no cookies, no answer."
+COOKIE_WHY = "subs and watch later are signed-in pages — no cookies, no answer."
 
 
 def cookie_fix(detail: str) -> list[str]:
@@ -732,8 +743,40 @@ def empty_feed_advice(detail: str) -> list[str]:
     ]
 
 
+def empty_later_advice(detail: str) -> list[str]:
+    """What an empty Watch Later means, which is one of two things.
+
+    Unlike the feed, an empty Watch Later is a list somebody can really have —
+    everything on it watched and cleared. But a signed-out session reads the
+    same way, so the screen says both and how old the jar is rather than
+    picking the comfortable one.
+    """
+    return [
+        "watch later came back empty",
+        "either nothing is saved there, or the cookies have expired — a "
+        "signed-out session reads as an empty list too.",
+        *cookie_fix(detail),
+    ]
+
+
 def subs_argv(count: int = SUBS_RESULTS) -> list[str]:
-    """The command one look at the feed runs, kept separate so it can be checked.
+    """The command one look at the feed runs — :func:`feed_argv` for the feed."""
+    return feed_argv(SUBS_URL, count)
+
+
+def later_argv(count: int = SUBS_RESULTS) -> list[str]:
+    """The command one look at Watch Later runs, on the feed's same bound.
+
+    A playlist is served a hundred entries a page rather than the feed's
+    thirty or so, and a Watch Later that has been a to-do list for years is
+    thousands long — so ``--playlist-end`` is the same whole cost argument
+    here as there.
+    """
+    return feed_argv(WL_URL, count)
+
+
+def feed_argv(url: str, count: int = SUBS_RESULTS) -> list[str]:
+    """The command one look at a signed-in list runs, kept separate so it can be checked.
 
     ``--playlist-end`` is the whole cost argument, and it is the same shape of
     trap :func:`search_argv` documents: without it this works perfectly and
@@ -750,7 +793,7 @@ def subs_argv(count: int = SUBS_RESULTS) -> list[str]:
     """
     return [
         *ytdl_item.ytdl_argv(),
-        SUBS_URL,
+        url,
         "--flat-playlist",
         "--playlist-end",
         str(count),
@@ -769,9 +812,19 @@ def subscriptions(count: int = SUBS_RESULTS, timeout: int | None = None) -> list
     is asked for, because giving up part way through has spent every byte
     walked so far and kept nothing.
     """
+    return read_feed(SUBS, count, timeout)
+
+
+def read_feed(feed: Feed, count: int = SUBS_RESULTS, timeout: int | None = None) -> list[Result]:
+    """The first *count* videos of a signed-in list, in the order YouTube keeps.
+
+    Newest first for the feed; for Watch Later, whatever order the playlist is
+    sorted in on YouTube — this does not re-sort it, because that order is
+    somebody's own decision about what to watch next.
+    """
     if timeout is None:
         timeout = SUBS_TIMEOUT_BASE + SUBS_TIMEOUT_PER * count
-    return entries(ask(subs_argv(count), timeout))
+    return entries(ask(feed_argv(feed.url, count), timeout))
 
 
 def feed_cost(count: int) -> str:
@@ -790,7 +843,12 @@ def feed_cost(count: int) -> str:
 
 
 def feed_meta(
-    count: int, when: str, more: int | None, at_cap: bool, width: int
+    count: int,
+    when: str,
+    more: int | None,
+    at_cap: bool,
+    width: int,
+    whole: str = "the whole feed",
 ) -> str:
     """The feed's second line: how much is on it, how old, and what more costs.
 
@@ -813,7 +871,7 @@ def feed_meta(
             else f"↓ {more} {feed_cost(more).replace(' ', '')}"
         )
     else:
-        deeper = "at the cap" if at_cap else "the whole feed"
+        deeper = "at the cap" if at_cap else whole
     parts = [f"{count} videos"]
     # The age is the first thing to go, and it is the right one: it is a
     # comfort, where the other two are the answer and the price.
@@ -864,9 +922,65 @@ def next_page(got: int, asked: int) -> tuple[int | None, bool]:
 #: own spelling and is here so that what somebody already knows works.
 FEED_WORDS = ("subs", ":subs", "subscriptions", ":subscriptions", ":ytsubs")
 
+#: And for Watch Later, on the same rule — ``:ytwatchlater`` is yt-dlp's.
+#: Not ``later`` alone: that one is a word somebody might search for.
+WL_WORDS = ("wl", ":wl", "watch later", "watchlater", ":watchlater", ":ytwatchlater")
+
+#: The playlist page itself, and only it. A *video* played out of Watch Later
+#: carries ``&list=WL`` too, and pasting one of those is asking for that video.
+WL_PAGE = re.compile(r"/playlist\?(?:[^#]*&)?list=wl(?:[&#]|$)")
+
+
+class Feed:
+    """One signed-in list: where it is, what it is called, what empty means.
+
+    Two of them, and everything that differs between them is here, so the
+    screen, the caches and ``--list`` each have one road for both.
+    """
+
+    def __init__(
+        self, key: str, url: str, banner: str, name: str, whole: str, empty
+    ) -> None:
+        #: What the listing is cached under, where a search is keyed on words.
+        self.key = key
+        self.url = url
+        #: The results screen's banner.
+        self.banner = banner
+        #: The noun in the sentences said about it — the spinner, the failure.
+        self.name = name
+        #: What the meta line says once there is nothing further back.
+        self.whole = whole
+        #: ``detail -> lines``: what an empty answer means for this list.
+        self.empty = empty
+
+
+SUBS = Feed(
+    SUBS_KEY, SUBS_URL, " subscriptions ", "the subscription feed",
+    "the whole feed", empty_feed_advice,
+)
+WATCH_LATER = Feed(
+    WL_KEY, WL_URL, " watch later ", "watch later",
+    "the whole list", empty_later_advice,
+)
+FEEDS = {feed.key: feed for feed in (SUBS, WATCH_LATER)}
+
+
+def which_feed(text: str) -> Feed | None:
+    """Which signed-in list the entry field is asking for, if either.
+
+    Asked *before* :func:`looks_like_url` for the reason
+    :func:`looks_like_feed` gives, which is true of both lists' URLs.
+    """
+    text = text.strip().lower()
+    if text in FEED_WORDS or "/feed/subscriptions" in text:
+        return SUBS
+    if text in WL_WORDS or WL_PAGE.search(text):
+        return WATCH_LATER
+    return None
+
 
 def looks_like_feed(text: str) -> bool:
-    """Whether the entry field is being asked for the subscription feed.
+    """Whether the entry field is being asked for a signed-in list.
 
     A third answer out of the same box, on :func:`looks_like_url`'s rule: the
     alternative on a phone is a mode key to remember, and the field is already
@@ -878,8 +992,7 @@ def looks_like_feed(text: str) -> bool:
     Asked *before* :func:`looks_like_url`, because the feed's own URL is a URL
     too and probing it gets the playlist refusal instead of the feed.
     """
-    text = text.strip().lower()
-    return text in FEED_WORDS or "/feed/subscriptions" in text
+    return which_feed(text) is not None
 
 
 def freshness(fetched: float | None, now: float | None = None) -> str:
@@ -3076,17 +3189,19 @@ def entry(win, paint: dict, initial: str = "") -> str | None:
         "search, or paste a URL" if narrow else "search youtube, or paste a URL",
         curses.A_BOLD | paint.get("head", 0),
     )
-    # Three answers now, and the third is written here or it does not exist:
-    # `subs` is a word typed into a field, with nothing on any screen to
-    # discover it from. The costs stand under it for the same reason they
+    # Four answers now, and the last two are written here or they do not
+    # exist: `subs` and `wl` are words typed into a field, with nothing on any
+    # screen to discover them from. The costs stand under it for the same reason they
     # always did — before anything is spent, rather than in a dialog after.
     if width < 40:
         _addstr(win, 6, 2, "search ~0.1 MB · a URL ~0.3 MB", curses.A_DIM)
         _addstr(win, 7, 2, "subs → your feed ~0.2 MB", curses.A_DIM)
+        _addstr(win, 8, 2, "wl → watch later ~0.2 MB", curses.A_DIM)
     else:
         _addstr(win, 6, 2, "words → youtube      ~0.1 MB", curses.A_DIM)
         _addstr(win, 7, 2, "a URL → the formats  ~0.1-0.5 MB", curses.A_DIM)
         _addstr(win, 8, 2, "subs  → your feed    ~0.2 MB", curses.A_DIM)
+        _addstr(win, 9, 2, "wl    → watch later  ~0.2 MB", curses.A_DIM)
     _addstr(
         win,
         height - 2,
@@ -3104,7 +3219,7 @@ def results(
     paint: dict,
     queued: set[int],
     running: Running,
-    feed: bool = False,
+    feed: Feed | None = None,
     fetched: float | None = None,
     more: int | None = None,
     at_cap: bool = False,
@@ -3122,7 +3237,8 @@ def results(
     One screen for the search results and the subscription feed, because they
     are the same list of the same things and everything below them — the
     duplicate marks, the format screen, the confirmation — takes a
-    :class:`Result` and does not care where it came from. *feed* changes the
+    :class:`Result` and does not care where it came from. *feed* — which of
+    the two signed-in lists, or ``None`` for a search — changes the
     four things that are genuinely different: what the banner calls it, that
     the listing has an age worth saying (*fetched*), that the middle key reads
     it again instead of searching again, and that there is more of it to be
@@ -3167,7 +3283,7 @@ def results(
             win,
             0,
             0,
-            fit(" subscriptions " if feed else f" search: {query} ", width - 1).ljust(
+            fit(feed.banner if feed else f" search: {query} ", width - 1).ljust(
                 width - 1
             ),
             curses.A_REVERSE | curses.A_BOLD | paint.get("head", 0),
@@ -3177,7 +3293,7 @@ def results(
             # pressed, which is the entry screen's rule applied to the one key
             # here that spends.
             meta = feed_meta(
-                len(hits), freshness(fetched), more, at_cap, width
+                len(hits), freshness(fetched), more, at_cap, width, feed.whole
             )
         else:
             meta = f"{len(hits)} results  ·  ~ approx dates"
@@ -3435,7 +3551,13 @@ def app(
     #: :func:`next_page` reads as the end of the feed, and the screen then
     #: says "the whole feed" over a third of it with the deeper look switched
     #: off.
-    subs_asked = subs_want = SUBS_RESULTS
+    #:
+    #: Per list, keyed on :attr:`Feed.key`: the feed and Watch Later are read
+    #: to their own depths, and going deeper in one is not going deeper in both.
+    subs_asked = {key: SUBS_RESULTS for key in FEEDS}
+    subs_want = dict(subs_asked)
+    #: Which signed-in list the ``subs`` screen is reading.
+    reading = SUBS
 
     # A saved dump stands in for whichever call would have fetched it, so both
     # halves of this can be worked on without spending anything.
@@ -3450,7 +3572,7 @@ def app(
             screen = "formats"
     elif first and looks_like_feed(first):
         # Before the URL test, because the feed's own URL passes that one too.
-        screen = "subs"
+        reading, screen = which_feed(first), "subs"
     elif first and looks_like_url(first):
         target, screen = first, "formats"
     elif first:
@@ -3466,7 +3588,7 @@ def app(
             if not text:
                 return receipts
             if looks_like_feed(text):
-                screen = "subs"
+                reading, screen = which_feed(text), "subs"
             elif looks_like_url(text):
                 target, came_from, screen = text, "entry", "formats"
             else:
@@ -3481,19 +3603,20 @@ def app(
                 message(win, cookie_advice(state, detail))
                 typed, screen = "", "entry"
                 continue
-            if SUBS_KEY in searched and not refetch:
-                hits = searched[SUBS_KEY]
+            key = reading.key
+            if key in searched and not refetch:
+                hits = searched[key]
             else:
+                want = subs_want[key]
                 found, failure = spinner_while(
                     win,
-                    f"reading your subscriptions — {subs_want}, "
-                    f"{feed_cost(subs_want)}…",
-                    lambda count=subs_want: subscriptions(count),
+                    f"reading {reading.name} — {want}, {feed_cost(want)}…",
+                    lambda count=want, feed=reading: read_feed(feed, count),
                 )
                 if failure is not None:
                     message(
                         win,
-                        ["the subscription feed did not come back", str(failure)]
+                        [f"{reading.name} did not come back", str(failure)]
                         # The fix and not a second verdict: yt-dlp has already
                         # said what went wrong on the line above, and expired
                         # cookies are what it usually means.
@@ -3501,22 +3624,23 @@ def app(
                     )
                     # Back to the depth the listing on screen really is: a
                     # deeper ask that did not come back is not a deeper ask.
-                    subs_want = subs_asked
+                    subs_want[key] = subs_asked[key]
+                    refetch = False
                     typed, screen = "", "entry"
                     continue
                 if found is None:
                     return receipts
-                hits = searched[SUBS_KEY] = found
-                stamps[SUBS_KEY] = time.time()
+                hits = searched[key] = found
+                stamps[key] = time.time()
                 # Committed here and nowhere else — the depth the answer on
                 # screen was actually answered at.
-                subs_asked = subs_want
+                subs_asked[key] = subs_want[key]
                 refetch = False
             if not hits:
-                message(win, empty_feed_advice(detail))
+                message(win, reading.empty(detail))
                 typed, screen = "", "entry"
                 continue
-            query, screen = SUBS_KEY, "results"
+            query, screen = key, "results"
 
         elif screen == "search":
             if query in searched:
@@ -3548,9 +3672,9 @@ def app(
         elif screen == "results":
             # Marked with what this session queued *and* what the queue
             # already holds, which are the same fact to whoever is reading it.
-            feed = query == SUBS_KEY
+            feed = FEEDS.get(query)
             more, at_cap = (
-                next_page(len(hits), subs_asked) if feed else (None, False)
+                next_page(len(hits), subs_asked[query]) if feed else (None, False)
             )
             picked, places[query] = results(
                 win,
@@ -3568,13 +3692,14 @@ def app(
             if picked is None:
                 typed, screen = "", "entry"
             elif picked == "r":
-                refetch, screen = True, "subs"
+                reading, refetch, screen = feed, True, "subs"
             elif picked == "more":
                 # The whole listing is bought again, not the extra thirty —
                 # `feed_cost` is the total for that reason, and the screen
                 # that offered this key said the total.
                 places[query] = bumped_place(places[query], len(hits))
-                subs_want, refetch, screen = more, True, "subs"
+                subs_want[query] = more
+                reading, refetch, screen = feed, True, "subs"
             elif isinstance(picked, str):
                 # `/` — the search prefills the field with the words that got
                 # here, and the feed has none to prefill it with.
@@ -3782,8 +3907,8 @@ def list_results(hits: list[Result], width: int) -> int:
     return 0
 
 
-def list_feed(count: int = SUBS_RESULTS) -> int:
-    """The subscription feed, printed. The same rows, without a terminal.
+def list_feed(count: int = SUBS_RESULTS, feed: Feed = SUBS) -> int:
+    """A signed-in list, printed. The same rows, without a terminal.
 
     Here for the same reason ``dlq``'s read-only screens are: this is the one
     thing on the feed side that something with no terminal can still ask for —
@@ -3807,11 +3932,11 @@ def list_feed(count: int = SUBS_RESULTS) -> int:
     if state in ("none", "missing"):
         return refuse(cookie_advice(state, detail))
     try:
-        hits = subscriptions(count)
+        hits = read_feed(feed, count)
     except ProbeError as exc:
         return refuse([str(exc), *cookie_fix(detail)])
     if not hits:
-        return refuse(empty_feed_advice(detail))
+        return refuse(feed.empty(detail))
     return list_results(hits, shutil.get_terminal_size(fallback=(80, 24)).columns)
 
 
@@ -3858,6 +3983,8 @@ def main(argv: list[str] | None = None) -> int:
               ytq crust of rust         search youtube (~0.1 MB)
               ytq subs                  browse your subscription feed
               ytq --list --subs         print the feed, write nothing
+              ytq wl                    browse your watch later playlist
+              ytq --list --wl           print watch later, write nothing
               ytq URL                   probe (~0.1-0.5 MB), pick, queue
               ytq --now URL             pick, then start it in the background
               ytq --list URL            print formats and caps, write nothing
@@ -3885,6 +4012,14 @@ def main(argv: list[str] | None = None) -> int:
         "cookies the yt-dlp config already points at",
     )
     parser.add_argument(
+        "--wl",
+        "--watch-later",
+        dest="wl",
+        action="store_true",
+        help="open your watch later playlist instead of searching; needs the "
+        "same cookies as --subs",
+    )
+    parser.add_argument(
         "--now",
         action="store_true",
         help="start it in the background instead of waiting for the nightly "
@@ -3905,8 +4040,13 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     first = " ".join(args.terms).strip()
 
+    if args.subs and args.wl:
+        parser.error("--subs and --wl are two lists; open one, and the other "
+                     "is a word away in the field")
     if args.subs and first:
         parser.error("--subs is the whole request; it takes no words or URL")
+    if args.wl and first:
+        parser.error("--wl is the whole request; it takes no words or URL")
 
     if args.list:
         if args.now:
@@ -3915,6 +4055,10 @@ def main(argv: list[str] | None = None) -> int:
             if args.from_json:
                 parser.error("--subs asks youtube; --from-json reads a saved dump")
             return list_feed()
+        if args.wl:
+            if args.from_json:
+                parser.error("--wl asks youtube; --from-json reads a saved dump")
+            return list_feed(feed=WATCH_LATER)
         if not (first or args.from_json):
             parser.error("--list needs a URL or --from-json")
         if first and not looks_like_url(first):
@@ -3934,10 +4078,13 @@ def main(argv: list[str] | None = None) -> int:
         # takes, handed to `app` down that one road rather than as a second
         # way in. One door: whatever routes `subs` routes this.
         first = ":subs"
+    elif args.wl:
+        first = ":wl"
 
     if not sys.stdout.isatty():
         print(
-            "ytq needs a terminal; use --list <url> or --list --subs otherwise",
+            "ytq needs a terminal; use --list <url>, --list --subs or "
+            "--list --wl otherwise",
             file=sys.stderr,
         )
         return 2

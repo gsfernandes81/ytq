@@ -53,10 +53,31 @@ def test_a_look_at_the_feed_is_bounded_to_what_was_asked_for(count):
     assert ytq.SUBS_URL in argv
 
 
+@given(count=st.integers(min_value=1, max_value=ytq.SUBS_MAX))
+def test_a_look_at_watch_later_is_bounded_the_same_way(count):
+    """A Watch Later kept as a to-do list for years is thousands long, so the
+    bound is the same whole cost argument as the feed's."""
+    argv = ytq.later_argv(count)
+    assert after(argv, "--playlist-end") == str(count)
+    assert "--flat-playlist" in argv
+    assert ytq.WL_URL in argv
+    assert ytq.SUBS_URL not in argv
+
+
+def test_each_list_reads_its_own_page(monkeypatch):
+    """One road for both lists, and the road carries which one it is."""
+    seen = []
+    monkeypatch.setattr(ytq, "ask", lambda argv, timeout: seen.append(argv) or {})
+    ytq.read_feed(ytq.WATCH_LATER, 30)
+    ytq.subscriptions(30)
+    assert ytq.WL_URL in seen[0] and ytq.SUBS_URL not in seen[0]
+    assert ytq.SUBS_URL in seen[1] and ytq.WL_URL not in seen[1]
+
+
 def test_neither_request_disables_the_user_config():
     """The cookies and the JS runtime live there; without them youtube
     answers with a fraction of what it has, or refuses."""
-    for argv in (ytq.search_argv("x"), ytq.subs_argv()):
+    for argv in (ytq.search_argv("x"), ytq.subs_argv(), ytq.later_argv()):
         assert not any(token.startswith("--ignore-config") for token in argv)
         assert "--no-config-locations" not in argv
 
@@ -224,6 +245,36 @@ def test_the_feed_is_asked_about_before_the_url_test():
     assert ytq.looks_like_url(ytq.SUBS_URL)
 
 
+def test_watch_later_is_asked_about_before_the_url_test_too():
+    """Its page is a playlist URL, which the probe would refuse as one."""
+    assert ytq.which_feed(ytq.WL_URL) is ytq.WATCH_LATER
+    assert ytq.which_feed("youtube.com/playlist?list=WL&pp=x") is ytq.WATCH_LATER
+    assert ytq.looks_like_url(ytq.WL_URL)
+    assert ytq.which_feed(ytq.SUBS_URL) is ytq.SUBS
+
+
+def test_a_video_played_out_of_watch_later_is_that_video():
+    """``&list=WL`` rides along on every video opened from the list, and a
+    pasted one of those is asking for the video, not the list."""
+    for link in ("https://www.youtube.com/watch?v=abc&list=WL&index=3",
+                 "https://www.youtube.com/playlist?list=WLx",
+                 "https://www.youtube.com/playlist?list=PLabc"):
+        assert ytq.which_feed(link) is None, link
+
+
+@given(word=st.sampled_from(ytq.WL_WORDS))
+def test_every_spelling_of_watch_later_is_taken_however_it_is_typed(word):
+    assert ytq.which_feed(f"  {word.upper()} ") is ytq.WATCH_LATER
+
+
+def test_the_two_lists_are_told_apart():
+    assert not set(ytq.FEED_WORDS) & set(ytq.WL_WORDS)
+    assert set(ytq.FEEDS) == {ytq.SUBS_KEY, ytq.WL_KEY}
+    # Cached beside searches under keys nobody can type as a search.
+    assert all(key.startswith(":") for key in ytq.FEEDS)
+    assert ytq.which_feed("later") is None
+
+
 @given(word=st.sampled_from(ytq.FEED_WORDS))
 def test_every_spelling_of_the_feed_is_taken_however_it_is_typed(word):
     assert ytq.looks_like_feed(f"  {word.upper()} ")
@@ -314,6 +365,25 @@ def test_an_empty_feed_is_never_reported_as_nothing_new():
     # The fix is one spelling appended to every screen that cannot read the
     # feed, so a refusal and an empty answer cannot go stale apart.
     assert said[-len(ytq.cookie_fix(detail)):] == ytq.cookie_fix(detail)
+
+
+def test_an_empty_watch_later_says_both_things_it_can_mean():
+    """An empty Watch Later can be real, unlike an empty feed — but a
+    signed-out session reads the same, so both are said and the fix is on it."""
+    detail = "~/.config/yt-dlp/cookies.txt, written 30 days ago"
+    said = ytq.empty_later_advice(detail)
+    joined = " ".join(said).lower()
+    assert "watch later" in joined
+    assert "cookie" in joined
+    assert said[-len(ytq.cookie_fix(detail)):] == ytq.cookie_fix(detail)
+    assert ytq.WATCH_LATER.empty is ytq.empty_later_advice
+    assert ytq.SUBS.empty is ytq.empty_feed_advice
+
+
+def test_the_end_of_each_list_says_which_list_it_is_the_end_of():
+    for feed in ytq.FEEDS.values():
+        line = ytq.feed_meta(12, "just now", None, False, 80, feed.whole)
+        assert feed.whole in line
 
 
 def test_the_refusal_carries_the_same_fix_and_says_which_it_is():
