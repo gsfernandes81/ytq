@@ -27,8 +27,29 @@ Decisions that travel with this code:
   `expire_ui` takes `curses = ytq.curses`, never its own: `pick_place` runs
   inside this session, so the two must be one implementation. The tests point
   `BEWITCH_HOME` at the checkout before `$HOME` moves (`$YTQ_TEST_BEWITCH` for a
-  copied tree). Restyling a screen is `win.draw(y, x, block)` with a bewitch
-  render; until a screen is restyled it looks exactly as it did.
+  copied tree).
+- **Every screen is in bewitch's house style** (2026-10-10, `bewitched`) —
+  `bewitch/docs/house-style.md`, applied by its own table: `bubbles.header`
+  where the reverse-video banners were, `bubbles.section` for the meta line,
+  the cursor row a `primary` bar (both lines of a result), theme greys for
+  `A_DIM`, cost roles for the colour pairs, `short_help` for the hints, a
+  `tag` for the confirmation's cap, a scrollbar in the column the rows
+  already left in hand, and `message()` and `spinner_while` as rounded boxes
+  **composed over** the screen that raised them, never erasing it — dlq gets
+  that `message()` for free. The fork between bewitch and plain curses is
+  **one layer** (`STYLED`, `_text`, `_header`, `_section`, `_help`,
+  `_scrollbar`, `_draw`): screens hand over *pieces* — text and a role —
+  and only those helpers know which of the two is drawing. The bewitch
+  imports are guarded, so with no checkout ytq imports and draws exactly as
+  it did, and a pty test holds that. What did **not** move: the rows the
+  screens are laid out on (the blank above the section is given up, so the
+  list keeps every row it had; the hints stay on the second-to-last row), the
+  `HINTS`/`TIGHT_HINTS` strings (read as pairs by `help_pairs` only to be
+  drawn, and a test pins every set whole through `short_help` at its room),
+  and `result_row`/`format_row` — the colours are laid over their own text,
+  so `title_room`, the marquee and `--list` are still one layout. A notice
+  box takes the four rows the full-screen notice kept, so `message_body`'s
+  bound is the box's bound, and every notice is measured whole at 40x24.
 - **`ytq` is a four-screen curses app**: search, results, formats, confirm.
   The search is one flat `ytsearch` request — the only place it spends data
   unasked — with `--extractor-args youtubetab:approximate_date`, which is why
@@ -188,9 +209,11 @@ The eight files, and what each is for:
   write-then-place path with `expire_ui.place` stubbed — the stub checks the
   file is on disk *before* dlq is asked to move it.
 - `test_layout.py` — the widths, 32 columns up, as properties: every hint set
-  in its stated room, every row inside the terminal, `viewport` always handing
-  back a place the screen draws, `message_body` never growing past its own way
-  out, and the marquee filling its room exactly.
+  in its stated room (and drawn whole through `short_help` there), every row
+  inside the terminal, `viewport` always handing back a place the screen
+  draws, `message_body` never growing past its own way out, every notice
+  whole in its box at 40x24, the marquee filling its room exactly, and a
+  drawn row being `result_row`'s own text under its colours.
 - `test_cli.py` — the paths with no terminal: the flag combinations that are
   refused, `--list --from-json` printing and writing nothing, the feed
   refusing without a cookie, and the receipts printed after curses is gone.
@@ -200,9 +223,13 @@ The eight files, and what each is for:
   literals. Arrows go as `\x1bOA`/`\x1bOB` because keypad mode is on. It
   drives what costs nothing: the entry field, the cookie refusal, a listing
   and a format list from a saved dump, the confirmation, and the whole road
-  from a dump to a written item. **The idle-screen property is here**: a
-  screen of short titles emits zero bytes over two seconds and one with a
-  title too long for its room does not.
+  from a dump to a written item. The cursor row is found as a filled bar
+  (any background, or reverse video where there is no colour); a notice is
+  checked to be a box over the screen behind it; and one test drives the
+  listing, the field and a notice with `BEWITCH_HOME` pointed at nothing,
+  which is plain curses. **The idle-screen property is here**: a screen of
+  short titles emits zero bytes over two seconds and one with a title too
+  long for its room does not.
 
 Two helpers deleted with the old self-tests are back as tests rather than as
 code: the shebang question (`test_the_runner_admits_what_ytq_writes` expects
