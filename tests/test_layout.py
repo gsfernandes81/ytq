@@ -10,6 +10,7 @@ the content a phone actually gets.
 
 from __future__ import annotations
 
+import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
@@ -432,3 +433,177 @@ def test_the_room_a_title_gets_is_what_the_row_gives_it():
     for width in WIDTHS:
         drawn = ytq.result_row(result, width)[0]
         assert drawn.count("x") + drawn.count("…") == ytq.title_room(result, width)
+
+
+# --------------------------------------------------------------------------- #
+# Drawn through bewitch: the same rooms, in the Crush look
+# --------------------------------------------------------------------------- #
+
+styled = pytest.mark.skipif(
+    not ytq.STYLED, reason="no bewitch checkout; the screens draw with plain curses"
+)
+
+#: What a notice is told, measured where it is said: one of each kind the
+#: screens raise, with a cookie line as long as a real one.
+DETAIL = "the jar at ~/.config/yt-dlp/cookies.txt was written 3 weeks ago"
+NOTICES = {
+    "no cookies": ytq.cookie_advice("none", DETAIL),
+    "no jar": ytq.cookie_advice("missing", DETAIL),
+    "empty feed": ytq.empty_feed_advice(DETAIL),
+    "empty watch later": ytq.empty_later_advice(DETAIL),
+    "bot check": ytq.withheld_advice(
+        DETAIL, "2026.08.01", "uv tool upgrade yt-dlp", "git -C ~/ytq pull"
+    ),
+    "feed failed": ["the subscription feed did not come back",
+                    "yt-dlp exited 1: ERROR: unable to download webpage",
+                    *ytq.cookie_fix(DETAIL)],
+}
+
+
+def test_a_hint_string_reads_back_as_its_pairs():
+    """The tables stay strings, measured as strings; ``short_help`` gets them
+    as pairs, two spaces apart, a key and its words one space apart."""
+    assert ytq.help_pairs("↑↓  ⏎ formats  / new  q back") == [
+        ("↑↓", ""), ("⏎", "formats"), ("/", "new"), ("q", "back"),
+    ]
+    assert ytq.help_pairs("⏎ go   esc quit") == [("⏎", "go"), ("esc", "quit")]
+    assert ytq.help_pairs("⏎ now PAID  t queue") == [("⏎", "now PAID"), ("t", "queue")]
+
+
+def _whole(keys, room):
+    """Every pair of *keys* is on the help row drawn in *room*, and none was
+    dropped for want of space."""
+    line = ytq.help_line(keys, room)
+    assert line.width == room
+    drawn = line.plain()
+    assert "…" not in drawn, (keys, room, drawn)
+    for key, words in ytq.help_pairs(keys):
+        assert f"{key} {words}".strip() in drawn, (keys, room, drawn)
+
+
+@styled
+def test_every_hint_set_is_drawn_whole_in_its_room():
+    """``short_help`` puts `` • `` between pairs where they fit and two spaces
+    where they do not, before it drops one — so a set measured to its room as
+    a string is still whole on the screen, way out and all."""
+    for keys in ytq.HINTS.values():
+        _whole(keys, ytq.HINT_WIDTH)
+    for keys in ytq.TIGHT_HINTS.values():
+        _whole(keys, ytq.TIGHT_WIDTH)
+
+
+@styled
+def test_the_confirmation_s_list_is_drawn_whole_at_every_width():
+    for width in WIDTHS:
+        for now in (True, False):
+            _whole(ytq.confirm_hints(now, width), width - 2)
+
+
+@styled
+def test_the_header_section_and_help_are_exactly_the_width_they_are_given():
+    for width in WIDTHS:
+        assert ytq.bubbles.header("ytq", [f"search: {LONG_TITLE}"], width).width == width
+        assert ytq.bubbles.section(ytq.fit(LONG_TITLE, width - 2), width).width == width
+        assert ytq.help_line(ytq.hint("results", width), width - 2).width == width - 2
+
+
+@styled
+@given(
+    width=st.integers(min_value=32, max_value=120),
+    title=st.text(alphabet=st.characters(min_codepoint=32, max_codepoint=126),
+                  min_size=1, max_size=90),
+    queued=st.booleans(),
+    tick=st.one_of(st.none(), st.integers(min_value=0, max_value=200)),
+)
+def test_a_result_is_drawn_from_the_same_text_it_prints(width, title, queued, tick):
+    """The colours are laid over :func:`result_row`'s own text, cut where it
+    lays its columns out, so the screen and ``--list`` stay one layout and the
+    title the marquee measured is the title drawn."""
+    result = a_result(title)
+    rows = ytq.result_pieces(result, width, queued, tick)
+    assert ["".join(text for text, *_ in pieces) for pieces in rows] == (
+        ytq.result_row(result, width, queued, tick)
+    )
+    for pieces in rows:
+        for selected in (False, True):
+            assert ytq.styled_line(pieces, width - 1, selected).width == width - 1
+
+
+@styled
+def test_the_selection_is_a_bar_across_the_whole_row():
+    """Both lines of the cursor's result, filled to the scrollbar's column —
+    never reverse video, and never stopping where the text does."""
+    result = a_result("short", channel="ch")
+    for width in (32, 40, 80):
+        for pieces in ytq.result_pieces(result, width, True, 0):
+            line = ytq.styled_line(pieces, width - 1, bar=True)
+            cells = [pen for row in line.rows() for _, pen in row]
+            assert len(cells) == width - 1
+            assert all(pen.bg == ytq.THEME.primary for pen in cells)
+            assert not any(pen.reverse for pen in cells)
+
+
+@styled
+def test_a_format_row_keeps_its_text_and_its_nights_note():
+    """The size and the note are coloured by what they cost; the words are
+    the row :func:`format_row` lays out, untouched."""
+    option = ytq.Choice("merge", "137+140", 8 * 1024**3, True, "mp4",
+                        "2160p mp4", "avc1 + mp4a 129k, merged")
+    for width in WIDTHS:
+        pieces = ytq.format_pieces(option, width - 1)
+        assert "".join(text for text, _ in pieces) == ytq.format_row(option, width - 1)
+        assert pieces[-1] == (ytq.nights_note(option.size), "error")
+
+
+@styled
+def test_every_notice_is_whole_in_its_box_on_a_phone():
+    """40x24, the phone in portrait: the box is the whole width, its body the
+    width the full-screen notice always wrapped to, and its border and key row
+    the four rows that notice kept — so each of these says all of itself,
+    nothing cut, with the way out inside the box and the box on the screen."""
+    columns, height = 40, 24
+    width = columns - 4
+    for name, lines in NOTICES.items():
+        body = ytq.message_body(lines, width, height - 4)
+        assert body == ytq.message_body(lines, width, 1000), name
+        head = len(ytq.wrapped(lines[0], width))
+        box = ytq.message_box(body, head, columns)
+        assert box.width == columns, name
+        assert box.height <= height, name
+        inside = [row[2:-2] for row in box.plain().splitlines()[1:-1]]
+        assert "any key" in inside[-1], name
+        # The verdict whole, across however many rows it wrapped to.
+        said = " ".join(" ".join(inside).replace("╱", "").split())
+        assert " ".join(lines[0].split()) in said, name
+
+
+@styled
+@given(
+    lines=st.lists(st.text(alphabet=st.characters(min_codepoint=32,
+                                                  max_codepoint=126),
+                           min_size=1, max_size=200),
+                   min_size=1, max_size=8),
+    columns=st.integers(min_value=32, max_value=120),
+    height=st.integers(min_value=8, max_value=40),
+)
+def test_a_notice_box_never_outgrows_the_screen(lines, columns, height):
+    """However long the notice, the box fits the screen with its key row in
+    it: the bound :func:`message_body` keeps is the box's bound too."""
+    box_width = min(columns, ytq.MESSAGE_MAX)
+    width = max(20, box_width - 4)
+    body = ytq.message_body(lines, width, max(1, height - 4))
+    box = ytq.message_box(body, len(ytq.wrapped(lines[0], width)), box_width)
+    assert box.width == box_width <= columns
+    assert box.height <= height
+    assert "any key" in box.plain().splitlines()[-2]
+
+
+@styled
+def test_the_wait_box_fits_and_spins():
+    for width in WIDTHS:
+        frames = {ytq.wait_box("searching for " + LONG_TITLE, "metadata only, no media",
+                               tick, width).plain() for tick in range(8)}
+        assert len(frames) > 1
+        for tick in range(3):
+            box = ytq.wait_box("x", "metadata only, no media", tick, width)
+            assert box.width <= width and box.height == 4

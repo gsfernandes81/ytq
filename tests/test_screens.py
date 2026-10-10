@@ -68,6 +68,54 @@ def test_the_feed_is_refused_before_a_byte_is_spent_on_it(tui):
     session.wait_for(lambda text: "paste a URL" in text)
 
 
+def test_a_notice_is_a_box_over_the_screen_that_raised_it(tui):
+    """Composed over the screen, never by clearing it: what was being looked
+    at stays behind the box, and the box carries its own way out."""
+    if not ytq.STYLED:
+        pytest.skip("no bewitch checkout; plain notices are full-screen")
+    session = tui()
+    session.wait_for(lambda text: "paste a URL" in text)
+    session.send("subs" + ENTER)
+    session.wait_for(lambda text: "cookie" in text.lower())
+    settled(session)
+    lines = session.screen.display
+    # The entry screen's header is still there, above the box.
+    assert "ytq" in lines[0]
+    top = next(row for row, line in enumerate(lines) if line.startswith("╭"))
+    bottom = next(row for row, line in enumerate(lines) if line.startswith("╰"))
+    assert 0 < top < bottom < len(lines)
+    assert "any key" in lines[bottom - 1]
+    session.send(" ")
+    session.wait_for(lambda text: "paste a URL" in text and "╭" not in text)
+
+
+def test_with_no_bewitch_the_screens_still_draw_with_plain_curses(tui, make_dump):
+    """A phone that has not cloned bewitch still gets its queue: the
+    standard library's curses draws every screen, the cursor row reversed as
+    it always was, and the notices still have their way out."""
+    dump = make_dump(search_info(["First One", "Second One"]))
+    session = tui("--from-json", str(dump), BEWITCH_HOME="/nonexistent/bewitch")
+    session.wait_for(lambda text: "Second One" in text)
+    settled(session)
+    assert "search" in session.screen.display[0]
+    assert any(
+        cell.reverse and cell.data.strip()
+        for row in range(3, session.screen.lines)
+        for cell in session.screen.buffer[row].values()
+    )
+    assert "q" in session.hints
+    session.send("q")
+    session.wait_for(lambda text: "paste a URL" in text)
+    session.send("subs" + ENTER)
+    said = session.wait_for(lambda text: "cookie" in text.lower())
+    assert "any key" in said
+    session.send(" ")
+    session.wait_for(lambda text: "paste a URL" in text)
+    session.send(ESC)
+    assert session.wait_exit() == 0
+    assert "plain curses" in session.raw.decode(errors="replace")
+
+
 def test_watch_later_is_the_same_listing_by_the_same_road(tui, tmp_path):
     """``wl`` in the field reads the playlist page and lands on the results
     screen under its own banner. The yt-dlp here is a stand-in module put
