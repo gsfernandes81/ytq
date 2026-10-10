@@ -4522,7 +4522,7 @@ def main(argv: list[str] | None = None) -> int:
     if BEWITCH is None:
         print(
             "ytq: no bewitch checkout with bewitch.cursed (~/bewitch or "
-            "$BEWITCH_HOME, on bewitch's bewitched branch); "
+            "$BEWITCH_HOME, on bewitch's cursed branch); "
             "drawing with plain curses",
             file=sys.stderr,
         )
