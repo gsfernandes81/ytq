@@ -27,7 +27,12 @@ Decisions that travel with this code:
   `expire_ui` takes `curses = ytq.curses`, never its own: `pick_place` runs
   inside this session, so the two must be one implementation. The tests point
   `BEWITCH_HOME` at the checkout before `$HOME` moves (`$YTQ_TEST_BEWITCH` for a
-  copied tree).
+  copied tree). `bewitch.cursed` lives only on **bewitch's `bewitched`
+  branch** — it was taken off bewitch's main as more than a styling library
+  should carry — so this branch wants the bewitch checkout on `bewitched`; on
+  bewitch's main it falls back to plain curses and says so. The owner is
+  having ytq rebuilt on blessed, with on-screen buttons, by other agents; this
+  branch is not to be merged.
 - **Every screen is in bewitch's house style** (2026-10-10, `bewitched`) —
   `bewitch/docs/house-style.md`, applied by its own table: `bubbles.header`
   where the reverse-video banners were, `bubbles.section` for the meta line,
