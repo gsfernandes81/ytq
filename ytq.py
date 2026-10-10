@@ -63,7 +63,6 @@ the download reporting its progress along the bottom.
 from __future__ import annotations
 
 import argparse
-import curses
 import fcntl
 import json
 import math
@@ -115,6 +114,36 @@ def _root() -> Path:
     """
     return _sibling("dlq", "EXPIRE_HOME")
 
+
+def _curses():
+    """The curses ytq draws with: bewitch's stand-in, from the bewitch checkout.
+
+    ``bewitch.cursed`` keeps every call this module makes and draws them
+    through bewitch — 24-bit colour, only changed lines written, and a key
+    decoder that never turns a wheel report into keypresses. It is found the
+    way every sibling is (``$BEWITCH_HOME``, beside, ``~/bewitch``). Where
+    there is no bewitch checkout the standard library's curses runs instead,
+    unchanged, and :func:`main` says so once before the screen opens — a
+    phone that has not cloned bewitch yet still gets its queue.
+    """
+    root = _sibling("bewitch", "BEWITCH_HOME")
+    if (root / "bewitch" / "cursed.py").is_file():
+        # Appended, not inserted: the bewitch checkout must never shadow a
+        # module of this one's (it has a tests/ of its own, for one).
+        if str(root) not in sys.path:
+            sys.path.append(str(root))
+        try:
+            from bewitch import cursed
+
+            return cursed, root
+        except ImportError:
+            pass
+    import curses as plain
+
+    return plain, None
+
+
+curses, BEWITCH = _curses()
 
 HERE = _root()
 # expire_runner and expire_dl live at the queue root; ytdl_item reaches
@@ -4090,6 +4119,12 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     os.environ.setdefault("ESCDELAY", "25")
+    if BEWITCH is None:
+        print(
+            "ytq: no bewitch checkout (~/bewitch or $BEWITCH_HOME); "
+            "drawing with plain curses",
+            file=sys.stderr,
+        )
     dest = str(Path(args.dest).expanduser()) if args.dest else "video"
     # A list, because a session can queue several items now. The download-now
     # case is already running by the time this returns: it was handed to a

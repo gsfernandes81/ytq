@@ -16,6 +16,19 @@ same way; a written item spells **both** directories into its own
 
 Decisions that travel with this code:
 
+- **The screens draw through bewitch** (2026-10-10, branch `bewitched`).
+  `curses` in this module is `ytq._curses()`'s answer: `bewitch.cursed`, a
+  stand-in with curses' own calls and constant values, drawn through
+  bewitch's `Canvas` and `Frame` (only changed lines written, nothing when
+  nothing changed) and read through `bewitch.terminal` (a decoder that never
+  turns a wheel report into keys). The bewitch checkout is found like every
+  sibling — `$BEWITCH_HOME`, beside, `~/bewitch` — and where there is none the
+  standard library's curses runs instead and `main` says so once. dlq's
+  `expire_ui` takes `curses = ytq.curses`, never its own: `pick_place` runs
+  inside this session, so the two must be one implementation. The tests point
+  `BEWITCH_HOME` at the checkout before `$HOME` moves (`$YTQ_TEST_BEWITCH` for a
+  copied tree). Restyling a screen is `win.draw(y, x, block)` with a bewitch
+  render; until a screen is restyled it looks exactly as it did.
 - **`ytq` is a four-screen curses app**: search, results, formats, confirm.
   The search is one flat `ytsearch` request — the only place it spends data
   unasked — with `--extractor-args youtubetab:approximate_date`, which is why

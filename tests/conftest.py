@@ -106,6 +106,23 @@ if DLQ is None:  # pragma: no cover - the environment, not a behaviour
 
 _ZWANA = _zwana_checkout(DLQ)
 
+
+def _bewitch_checkout() -> Path | None:
+    """bewitch, which ytq draws its screens through. ``$YTQ_TEST_BEWITCH``
+    first, for the same reason as dlq's: a copied tree has no sibling."""
+    for candidate in (
+        os.environ.get("YTQ_TEST_BEWITCH"),
+        os.environ.get("BEWITCH_HOME"),
+        REPO.parent / "bewitch",
+        Path.home() / "bewitch",
+    ):
+        if candidate and (Path(candidate).expanduser() / "bewitch" / "cursed.py").is_file():
+            return Path(candidate).expanduser()
+    return None
+
+
+_BEWITCH = _bewitch_checkout()
+
 #: One root for the session. Per-test isolation is the ``clean_queue`` fixture
 #: emptying it, not a fresh tree: the paths are module constants in ytq and
 #: cannot be re-pointed once it is imported.
@@ -123,6 +140,9 @@ os.environ["EXPIRE_HOME"] = str(QUEUE_ROOT)
 os.environ["YTQ_HOME"] = str(REPO)
 if _ZWANA is not None:
     os.environ["ZWANA_HOME"] = str(_ZWANA)
+if _BEWITCH is not None:
+    # Before $HOME is redirected below: ~/bewitch would name the temp home.
+    os.environ["BEWITCH_HOME"] = str(_BEWITCH)
 os.environ["HOME"] = str(HOME)
 os.environ.pop("XDG_CONFIG_HOME", None)
 # The runner's own guards read these; nothing in this suite fires a run, but a
