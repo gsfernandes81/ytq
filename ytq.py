@@ -145,6 +145,31 @@ def _curses():
 
 curses, BEWITCH = _curses()
 
+#: Whether the screens are drawn with bewitch's parts (the Crush look) or as
+#: plain curses text. One flag, asked by the handful of drawing helpers below
+#: and by nothing else: a screen describes its parts, and those helpers decide
+#: how they come out.
+STYLED = BEWITCH is not None
+
+if STYLED:
+    # Only with a checkout to import them from: with none, ytq still imports,
+    # and the plain-curses half of every helper below is what draws.
+    from bewitch import bubbles  # noqa: E402
+    from bewitch.bubbles import spinner as spinners  # noqa: E402
+    from bewitch.lipgloss import (  # noqa: E402
+        LEFT,
+        TOP,
+        Block,
+        Pen,
+        Span,
+        Style,
+        join_horizontal,
+        join_vertical,
+        rounded_border,
+        string_width,
+    )
+    from bewitch.theme import CHARM as THEME  # noqa: E402
+
 HERE = _root()
 # expire_runner and expire_dl live at the queue root; ytdl_item reaches
 # expire_dl through this same insert when run out of this checkout.
@@ -2190,6 +2215,336 @@ def wrapped(text: str, width: int) -> list[str]:
     return textwrap.wrap(text, width, break_on_hyphens=False) or [""]
 
 
+# --------------------------------------------------------------------------- #
+# The parts a screen is drawn from
+#
+# Every screen below names its parts — a header, a section line, a row, the
+# help — and these helpers draw them: as bewitch's recipes in the Crush look
+# when there is a bewitch checkout (`STYLED`), and as the plain curses text
+# they always were when there is not. That fork lives here and nowhere else,
+# so a screen never asks which of the two it is on.
+#
+# Text is handed over as *pieces*: ``(text, role)`` or ``(text, role, bold)``.
+# A role is what the text is *for* — ``base`` body text, ``subtle``,
+# ``muted`` and ``faint`` stepping back from it, ``primary``, ``secondary``,
+# ``separator``, the three costs ``success``/``warning``/``error``, and
+# ``check`` for a ✓ mark — and the theme decides what colour that is. A
+# *bar* is the selection: the whole line filled in ``primary``.
+# --------------------------------------------------------------------------- #
+
+#: Which colour each role takes when drawn plain, from :func:`ink`'s pairs;
+#: anything absent is drawn in the terminal's own colour.
+PLAIN_COLOUR = {
+    "primary": "head",
+    "check": "fits",
+    "success": "fits",
+    "warning": "night",
+    "error": "nights",
+}
+
+#: The roles that were ``A_DIM`` before there was a theme to draw them grey.
+RECEDING = ("subtle", "muted", "faint", "separator")
+
+#: The cost bands as theme roles: green, amber, red, by how many nights.
+BAND_ROLE = {"fits": "success", "night": "warning", "nights": "error"}
+
+#: And as tag kinds, for the one figure on the confirmation drawn as a tag.
+BAND_TAG = {"fits": "success", "night": "warn", "nights": "error"}
+
+#: :func:`ink`'s answer, for the plain half of the helpers below. Set when
+#: :func:`ink` runs, which is once, when the session starts.
+_INK: dict[str, int] = {}
+
+#: The widest a notice box is drawn. A phone gets the whole width, because
+#: every column there is a word; a desk terminal gets a box rather than a line
+#: of text a hundred columns long.
+MESSAGE_MAX = 80
+
+
+def pieces_of(pieces) -> list[tuple[str, str, bool]]:
+    """*pieces* as ``(text, role, bold)`` triples, whichever way they came."""
+    out = []
+    for piece in pieces:
+        text, role, *bold = piece
+        out.append((text, role, bool(bold and bold[0])))
+    return out
+
+
+def _pen(role: str, bold: bool = False, bar: bool = False):
+    """The bewitch pen for *role*: its theme colour, or on the selection bar.
+
+    On the bar every word is ``on_primary`` — a cost colour on a filled cell
+    is the unreadable case the reversed row used to avoid — except the
+    receding greys, which step back to ``fg_subtle`` as ``list_item``'s
+    subtitles do, and a ✓, which keeps its green the way ``list_item`` keeps
+    its mark.
+    """
+    t = THEME
+    weight = True if bold else None
+    if bar:
+        if role == "check":
+            fg = t.success
+        elif role in RECEDING:
+            fg = t.fg_subtle
+        else:
+            fg = t.on_primary
+        return Pen(fg=fg, bg=t.primary, bold=weight)
+    fg = {
+        "base": t.fg_base,
+        "subtle": t.fg_subtle,
+        "muted": t.fg_more_subtle,
+        "faint": t.fg_most_subtle,
+        "primary": t.primary,
+        "secondary": t.secondary,
+        "separator": t.separator,
+        "success": t.success,
+        "warning": t.warning,
+        "error": t.error,
+        "check": t.success,
+    }[role]
+    return Pen(fg=fg, bold=weight)
+
+
+def _plain_attr(role: str, bold: bool = False, bar: bool = False) -> int:
+    """The curses attribute *role* is drawn with where there is no bewitch."""
+    attr = curses.A_BOLD if bold else 0
+    if bar:
+        return attr | curses.A_REVERSE
+    if role in RECEDING:
+        attr |= curses.A_DIM
+    return attr | _INK.get(PLAIN_COLOUR.get(role, ""), 0)
+
+
+def styled_line(pieces, width: int, bar: bool = False):
+    """One line of *pieces* as a bewitch ``Block`` exactly *width* wide.
+
+    Cut at *width* if the pieces run past it; padded if they stop short, in
+    the bar's colour on the selection so the bar reaches the end of the row.
+    """
+    spans = [Span(text, _pen(role, bold, bar)) for text, role, bold in pieces_of(pieces)]
+    used = sum(string_width(span.text) for span in spans)
+    if used < width:
+        spans.append(Span(" " * (width - used), Pen(bg=THEME.primary) if bar else Pen()))
+    return Block([spans], max(0, width))
+
+
+def _draw(win, y: int, x: int, block) -> None:
+    """Put a bewitch render on the window, or its plain text where it cannot.
+
+    ``bewitch.cursed`` windows compose a ``Block`` where it is put; a window
+    without ``draw`` gets each line as text, colour lost and layout kept.
+    """
+    draw = getattr(win, "draw", None)
+    if draw is not None:
+        draw(y, x, block)
+        return
+    for offset, row in enumerate(block.plain().split("\n")):
+        _addstr(win, y + offset, x, row)
+
+
+def _text(win, y: int, x: int, pieces, width: int | None = None, bar: bool = False) -> None:
+    """One line of *pieces* at ``(y, x)``, at most *width* columns.
+
+    *width* is also how far a bar reaches; without one the line is as long as
+    its text.
+    """
+    pieces = pieces_of(pieces)
+    if width is None:
+        width = sum(len(text) for text, _, _ in pieces)
+    if width <= 0:
+        return
+    if STYLED:
+        _draw(win, y, x, styled_line(pieces, width, bar))
+        return
+    if bar:
+        line = "".join(text for text, _, _ in pieces)
+        _addstr(win, y, x, line.ljust(width)[:width], _plain_attr("base", False, True))
+        return
+    column, left = x, width
+    for text, role, bold in pieces:
+        text = text[:left]
+        if text:
+            _addstr(win, y, column, text, _plain_attr(role, bold))
+        column += len(text)
+        left -= len(text)
+
+
+def _header(win, width: int, details: list[str], tone: str = "head") -> None:
+    """The first row: ``ytq``, the band, and what this screen is about.
+
+    Plain, it is the reverse-video banner it always was, saying the same
+    words, and nothing at all where there are no words to say (the entry
+    field never had one). *tone* is that banner's colour.
+    """
+    if STYLED:
+        _draw(win, 0, 0, bubbles.header("ytq", details, width))
+    elif details:
+        _addstr(
+            win,
+            0,
+            0,
+            fit(" " + " — ".join(details) + " ", width - 1).ljust(width - 1),
+            curses.A_REVERSE | curses.A_BOLD | _INK.get(tone, 0),
+        )
+
+
+def _section(win, y: int, text: str, width: int) -> None:
+    """The grey line saying what is shown, running into a rule.
+
+    The words are the section's *title* and not its info, because
+    ``bubbles.section`` drops the info before it cuts the title — and here
+    the words are the whole point (a count, an age, a price). Fitted to two
+    columns short so the rule always has room to be a rule.
+    """
+    if STYLED:
+        _draw(win, y, 0, bubbles.section(fit(text, width - 2), width))
+    else:
+        _addstr(win, y, 1, fit(text, width - 2), curses.A_DIM)
+
+
+def help_pairs(keys: str) -> list[tuple[str, str]]:
+    """A hint string as ``(key, words)`` pairs, for ``short_help``.
+
+    The hint strings stay the tables they are — :data:`HINTS` and
+    :data:`TIGHT_HINTS`, measured as strings — and are read as pairs only to
+    be drawn: two or more spaces between pairs, one between a key and what it
+    does.
+    """
+    pairs = []
+    for item in re.split(r"\s{2,}", keys.strip()):
+        key, _, words = item.partition(" ")
+        pairs.append((key, words))
+    return pairs
+
+
+def help_line(keys: str | list[tuple[str, str]], room: int):
+    """The help row as a bewitch ``Block`` exactly *room* wide.
+
+    ``short_help`` tries `` • `` between pairs and falls back to two plain
+    spaces before it drops one, so a set measured to fit its room as a string
+    still fits it whole here — which a test pins for every set.
+    """
+    pairs = help_pairs(keys) if isinstance(keys, str) else list(keys)
+    return bubbles.short_help(pairs, room)
+
+
+def _help(win, y: int, keys: str | list[tuple[str, str]], width: int) -> None:
+    """The key hints, drawn at x=1 in the two columns short of the width that
+    every set is measured to."""
+    if STYLED:
+        _draw(win, y, 1, help_line(keys, width - 2))
+        return
+    if not isinstance(keys, str):
+        keys = "   ".join(f"{key} {words}".strip() for key, words in keys)
+    _addstr(win, y, 1, keys, curses.A_DIM)
+
+
+def _scrollbar(win, y: int, x: int, rows: int, total: int, visible: int, top: int) -> None:
+    """A scrollbar in the column a list leaves in hand — only where the list
+    is longer than the screen, and only where there is bewitch to draw it
+    (plain curses cannot write that column without raising)."""
+    if STYLED and total > visible and rows > 0:
+        _draw(win, y, x, bubbles.scrollbar(rows, total, visible, top))
+
+
+def _progress(win, y: int, x: int, line: str, width: int) -> None:
+    """A running download's line: the ↓ in the spinner's colour, the figures
+    after it bold."""
+    _text(win, y, x, [(line[:1], "secondary", True), (line[1:], "base", True)], width)
+
+
+def result_pieces(result: Result, width: int, queued: bool, tick: int | None):
+    """The pieces of a result's row or rows: :func:`result_row`'s text, cut
+    where it already lays its columns out, so the drawing and the printing
+    stay one layout.
+
+    A row this session has queued (or the queue holds) is drawn a step back,
+    its ✓ in green, the way the house style marks "already have it".
+    """
+    lines = result_row(result, width, queued, tick)
+    title = "muted" if queued else "base"
+    if width >= WIDE:
+        room = title_room(result, width)
+        line = lines[0]
+        return [[
+            (line[:1], "check" if queued else "base"),
+            (line[1 : 2 + room], title),
+            (line[2 + room :], "faint" if queued else "muted"),
+        ]]
+    head, tail = lines
+    return [
+        [(head[:1], "check" if queued else "base"), (head[1:], title)],
+        [(tail, "faint" if queued else "muted")],
+    ]
+
+
+def format_pieces(option: Choice, width: int):
+    """A format row's pieces: the size and any nights note in the colour of
+    what they cost, the rest in body text. The note is the words saying the
+    same thing, so a terminal without colour loses nothing."""
+    line = format_row(option, width)
+    band = BAND_ROLE[cost_band(option.size)]
+    size = human(option.size)
+    found = line.find(size)
+    cut = found + len(size) + 1 if found >= 0 else 0
+    note = nights_note(option.size)
+    end = len(line) - len(note) if note and line.endswith(note) else len(line)
+    return [(line[:cut], band), (line[cut:end], "base"), (line[end:], band)]
+
+
+def message_box(body: list[str], head: int, width: int):
+    """A notice as Crush's dialog: a rounded box in ``primary``, the verdict as
+    its title, the rest as its body, and its one key on the last row inside.
+
+    *body* is :func:`message_body`'s answer and *head* how many of its rows
+    the verdict wrapped to. The verdict is never cut to fit a one-line title —
+    it is the sentence that says why nothing was queued — so a verdict that
+    wraps is drawn whole in the title's colour, the band trailing its last
+    line. Two rows of border and two for the key: a body bounded to four rows
+    short of the screen is a box that fits it.
+    """
+    inner = max(1, width - 4)
+    rows = []
+    for index, text in enumerate(body[:head]):
+        if index == head - 1:
+            rows.append(bubbles.dialog_title(text, inner))
+        else:
+            rows.append(styled_line([(text, "primary")], inner))
+    rows += [styled_line([(text, "base")], inner) for text in body[head:]]
+    rows += [styled_line([], inner), help_line([("any key", "to continue")], inner)]
+    return (
+        Style()
+        .border(rounded_border())
+        .border_foreground(THEME.primary)
+        .padding(0, 1)
+        .width(width)
+        .render(join_vertical(LEFT, *rows))
+    )
+
+
+def wait_box(message: str, note: str, tick: int, width: int):
+    """The wait as a box over the screen: a spinner and what is being waited
+    for, and under it what the wait costs. Sized to its longest line and
+    clamped to the terminal, as the ASCII box before it was."""
+    frame = spinners.Dot.frame(tick)
+    lead = string_width(frame)
+    content = min(max(lead + len(message), len(note)), max(8, width - 6))
+    rows = [
+        styled_line(
+            [(frame, "secondary"), (fit(message, content - lead), "base", True)], content
+        ),
+        styled_line([(fit(note, content), "muted")], content),
+    ]
+    return (
+        Style()
+        .border(rounded_border())
+        .border_foreground(THEME.primary)
+        .padding(0, 1)
+        .width(content + 4)
+        .render(join_vertical(LEFT, *rows))
+    )
+
+
 #: One step of a scrolling title, and how many steps it holds still at each
 #: end of a lap before moving again. Slow on purpose: this is a list somebody
 #: is reading, not an animation, and a title that snaps past faster than it
@@ -2320,6 +2675,9 @@ def ink(win) -> dict[str, int]:
     Termux sets ``TERM=xterm-256color``, but this also runs over ssh and in
     whatever a scheduled shell inherits, so every step is allowed to fail and
     leave the attribute at 0 — which is exactly "draw it plain".
+
+    Read only by the plain-curses half of the drawing helpers now (through
+    ``_INK``): with bewitch, colour is the theme's, by role.
     """
     wanted = {
         "fits": curses.COLOR_GREEN,
@@ -2341,6 +2699,9 @@ def ink(win) -> dict[str, int]:
         except curses.error:
             continue
         got[name] = curses.color_pair(index)
+    # Kept for the drawing helpers' plain half, which is the only reader.
+    _INK.clear()
+    _INK.update(got)
     return got
 
 
@@ -2522,6 +2883,17 @@ def remember_format(choice: Choice) -> None:
         pass
 
 
+def _field(win, y: int, x: int, shown: str, width: int) -> None:
+    """The editor's field: a lifted panel the width of the room it has, or the
+    underline it always was where there is no bewitch."""
+    padded = shown + " " * (width - len(shown))
+    if STYLED:
+        pen = Pen(fg=THEME.fg_base, bg=THEME.bg_less_visible)
+        _draw(win, y, x, Block([[Span(padded, pen)]], max(0, width)))
+    else:
+        _addstr(win, y, x, padded, curses.A_UNDERLINE)
+
+
 def text_input(win, y: int, x: int, initial: str = "", width: int = 60) -> str | None:
     """A one-line editor. ``None`` if the user backed out with Esc."""
     buffer = list(initial)
@@ -2532,7 +2904,7 @@ def text_input(win, y: int, x: int, initial: str = "", width: int = 60) -> str |
         # these loops do is checked under a pty instead (tests/test_screens.py).
         while True:
             shown = "".join(buffer)[-width:]
-            _addstr(win, y, x, shown + " " * (width - len(shown)), curses.A_UNDERLINE)
+            _field(win, y, x, shown, width)
             win.move(y, min(x + len(shown), win.getmaxyx()[1] - 1))
             win.refresh()
             key = win.getch()
@@ -2550,6 +2922,34 @@ def text_input(win, y: int, x: int, initial: str = "", width: int = 60) -> str |
         # nomut: end
     finally:
         curses.curs_set(0)
+
+
+def _waiting(win, message: str, note: str, tick: int, height: int, width: int) -> None:
+    """One frame of the wait box, centred over whatever the screen last drew.
+
+    Rounded and spinning where there is bewitch; the ASCII box it always was
+    where there is not. Either way the frame is what says "this is on top of
+    that", and nothing behind it is erased.
+    """
+    row0 = max(0, height // 2 - 2)
+    if STYLED:
+        box = wait_box(message, note, tick, width)
+        _draw(win, row0, max(0, (width - box.width) // 2), box)
+        return
+    frames = "|/-\\"
+    body = [f"{frames[tick % 4]} {message}", note]
+    inner = min(max(len(row) for row in body) + 2, max(10, width - 4))
+    left = max(0, (width - inner - 2) // 2)
+    _addstr(win, row0, left, "+" + "-" * inner + "+")
+    for offset, row in enumerate(body, start=1):
+        _addstr(
+            win,
+            row0 + offset,
+            left,
+            "|" + f" {fit(row, inner - 2)}".ljust(inner) + "|",
+            curses.A_BOLD if offset == 1 else 0,
+        )
+    _addstr(win, row0 + len(body) + 1, left, "+" + "-" * inner + "+")
 
 
 def spinner_while(win, message: str, work) -> tuple[object, Exception | None]:
@@ -2573,7 +2973,6 @@ def spinner_while(win, message: str, work) -> tuple[object, Exception | None]:
     thread = threading.Thread(target=target, daemon=True)
     thread.start()
     win.nodelay(True)
-    frames = "|/-\\"
     tick = 0
     try:
         # nomut: start — a mutant inside a curses event loop does not fail a
@@ -2586,22 +2985,7 @@ def spinner_while(win, message: str, work) -> tuple[object, Exception | None]:
                 if width < WIDE
                 else "metadata only, no media is downloaded"
             )
-            body = [f"{frames[tick % 4]} {message}", note]
-            # An ASCII box, sized to its longest line and clamped to the
-            # terminal; the frame is what says "this is on top of that".
-            inner = min(max(len(row) for row in body) + 2, max(10, width - 4))
-            left = max(0, (width - inner - 2) // 2)
-            row0 = max(0, height // 2 - 2)
-            _addstr(win, row0, left, "+" + "-" * inner + "+")
-            for offset, row in enumerate(body, start=1):
-                _addstr(
-                    win,
-                    row0 + offset,
-                    left,
-                    "|" + f" {fit(row, inner - 2)}".ljust(inner) + "|",
-                    curses.A_BOLD if offset == 1 else 0,
-                )
-            _addstr(win, row0 + len(body) + 1, left, "+" + "-" * inner + "+")
+            _waiting(win, message, note, tick, height, width)
             win.refresh()
             tick += 1
             time.sleep(0.12)
@@ -2633,7 +3017,6 @@ def pick(
     """
     title = info.get("title") or "(untitled)"
     duration = info.get("duration")
-    paint = paint if paint is not None else dict.fromkeys(("fits", "head"), 0)
     top = 0
     cursor = max(0, min(start, len(options) - 1))
     flash: str | None = None
@@ -2645,13 +3028,7 @@ def pick(
         win.erase()
         height, width = win.getmaxyx()
         narrow = width < WIDE
-        _addstr(
-            win,
-            0,
-            0,
-            f" {title} ".ljust(width - 1)[: width - 1],
-            curses.A_REVERSE | curses.A_BOLD | paint.get("head", 0),
-        )
+        _header(win, width, [title])
         length = f"{int(duration) // 60}m{int(duration) % 60:02d}s" if duration else "?"
         meta = f"{length}  ·  {len(options)} format{'' if len(options) == 1 else 's'}"
         if not narrow:
@@ -2667,36 +3044,39 @@ def pick(
         # so twice is what makes a 40-column screen feel busy.
         if recalled and not narrow:
             meta += "  ·  last used"
-        _addstr(win, 1, 1, fit(meta, width - 2), curses.A_DIM)
+        _section(win, 1, meta, width)
         # Its own line and not another `·` clause on the meta, because it is
         # not a detail about this list — it is the reason the list is wrong.
         # Bold and cost-red where there is colour, and saying it in words
         # where there is not, on the rule the size column already follows.
         if withheld(info):
-            _addstr(
-                win,
-                2,
-                1,
-                fit(withheld_note(width), width - 2),
-                curses.A_BOLD | paint.get("nights", 0),
-            )
+            _text(win, 2, 1, [(withheld_note(width), "error", True)], width - 2)
 
         listed = max(1, height - 6)
         cursor, top = viewport(cursor, top, listed, len(options))
 
+        # The rows leave the last column in hand, as the results rows do, and
+        # the scrollbar is what it is in hand for. Laid out to that width
+        # rather than clipped to it, so the nights note at the end of a row is
+        # never the thing the edge takes.
+        body = width - 1
         for row in range(listed):
             index = top + row
             if index >= len(options):
                 break
-            option = options[index]
-            chosen = index == cursor
-            line = format_row(option, width)
             # The size is coloured by what it will cost, so the shape of the
             # list answers "which of these can this connection actually have"
-            # before any of them is read. Reversed on the cursor line, where a
-            # colour on a reversed cell is unreadable on some terminals.
-            attr = curses.A_REVERSE if chosen else paint.get(cost_band(option.size), 0)
-            _addstr(win, 3 + row, 0, line.ljust(width - 1), attr)
+            # before any of them is read. The cursor row is the selection bar,
+            # where a cost colour on a filled cell would be unreadable.
+            _text(
+                win,
+                3 + row,
+                0,
+                format_pieces(options[index], body),
+                body,
+                bar=index == cursor,
+            )
+        _scrollbar(win, 3, body, min(listed, len(options)), len(options), listed, top)
 
         # The row under the cursor says its codecs in full, on the spare line
         # above the hints. The list columns carry only the family (avc1, vp9)
@@ -2706,15 +3086,9 @@ def pick(
         # of them at once is a wall nothing can be read off. A flash — the
         # clipboard's answer to `c` — borrows the line for one keypress.
         if flash:
-            _addstr(win, height - 3, 1, fit(flash, width - 2), curses.A_BOLD)
+            _text(win, height - 3, 1, [(fit(flash, width - 2), "base", True)])
         elif options:
-            _addstr(
-                win,
-                height - 3,
-                1,
-                fit(options[cursor].codecs, width - 2),
-                curses.A_DIM,
-            )
+            _text(win, height - 3, 1, [(fit(options[cursor].codecs, width - 2), "muted")])
 
         if narrow:
             keys = hint("pick-now" if now_default else "pick", width)
@@ -2728,7 +3102,7 @@ def pick(
                 "↑↓ choose   enter queue it   n download it now   "
                 "c copy url   q back   ~ = estimate"
             )
-        _addstr(win, height - 2, 1, keys, curses.A_DIM)
+        _help(win, height - 2, keys, width)
         win.refresh()
 
         key = win.getch()
@@ -2862,6 +3236,24 @@ def take_spot(name: str, pos: int | None) -> str | None:
     return said if moved else f"{said} — {name} is last in the queue"
 
 
+def _cap(win, y: int, x: int, figure: str, rest: str, band: str, width: int) -> None:
+    """The cap: *figure* as a tag in its cost band's colour, *rest* after it.
+
+    The tag starts a column left of *x*, so its padding sits in the margin and
+    its words line up with the rows above and below it. Plain, the whole line
+    is bold in the band's colour, as it always was.
+    """
+    if not STYLED:
+        _text(win, y, x, [(figure + rest, BAND_ROLE[band], True)], width)
+        return
+    line = join_horizontal(
+        TOP,
+        bubbles.tag(figure, BAND_TAG[band]),
+        styled_line([(rest, "base")], max(0, width - string_width(figure) - 1)),
+    )
+    _draw(win, y, max(0, x - 1), line)
+
+
 #: The confirmation's two field labels, drawn at x=2 with their values in a
 #: column to the right of them.
 CONFIRM_LABELS = ("priority", "file name")
@@ -2905,7 +3297,6 @@ def confirm(
     # queue on its way to honouring it.
     spot: int | None = None
     queued: list[str] = []
-    paint = paint if paint is not None else dict.fromkeys(("fits", "head"), 0)
     # Resolved once: it needs the runner's config, and this redraws on
     # every keystroke.
     where = landing(dest)
@@ -2924,109 +3315,102 @@ def confirm(
         # The header is the screen's identity, and the fact it has to carry is
         # not "now versus later" but "paid versus free". Said in words because
         # a terminal without colours must not be the one that loses it.
-        _addstr(
-            win,
-            0,
-            0,
-            (" download NOW — paid " if now else " queue tonight — free ").ljust(
-                width - 1
-            ),
-            curses.A_REVERSE | curses.A_BOLD | paint.get("head", 0),
-        )
-        _addstr(
+        _header(win, width, ["download NOW — paid" if now else "queue tonight — free"])
+        _text(
             win,
             2,
             2,
-            f"{choice.label}  {choice.fmt}"
-            if narrow
-            else f"{choice.label}   format {choice.fmt}   {choice.detail}",
+            [(
+                f"{choice.label}  {choice.fmt}"
+                if narrow
+                else f"{choice.label}   format {choice.fmt}   {choice.detail}",
+                "base",
+            )],
+            width - 3,
         )
-        _addstr(
+        _text(
             win,
             3,
             2,
-            f"yt-dlp says {human(choice.size)}{'' if choice.exact else ' (estimated)'}",
+            [(
+                f"yt-dlp says {human(choice.size)}"
+                f"{'' if choice.exact else ' (estimated)'}",
+                "subtle",
+            )],
+            width - 3,
         )
-        # The cap is the number this screen exists to show, so it is bold and
-        # coloured by how many nights it will take — the same scale the format
-        # list used, so a red row stays red here.
-        cost = paint.get(cost_band(choice.expect_bytes), 0)
-        _addstr(
-            win,
-            4,
-            2,
-            f"cap {human(choice.expect_bytes)}"
-            if narrow
-            else f"EXPECT_BYTES {choice.expect_bytes:,} "
-            f"({human(choice.expect_bytes)}) — the cap the runner "
-            f"holds it to",
-            curses.A_BOLD | cost,
-        )
-        _addstr(win, 6, 2, CONFIRM_LABELS[0], curses.A_DIM)
-        _addstr(win, 7, 2, CONFIRM_LABELS[1], curses.A_DIM)
+        # The cap is the number this screen exists to show, so it is a tag in
+        # the colour of how many nights it will take — the same scale the
+        # format list used, so a red row stays red here. The figure is the
+        # tag's text, so it says itself with the colour gone.
+        band = cost_band(choice.expect_bytes)
+        if narrow:
+            _cap(win, 4, 2, f"cap {human(choice.expect_bytes)}", "", band, width - 3)
+        else:
+            _cap(
+                win,
+                4,
+                2,
+                f"EXPECT_BYTES {choice.expect_bytes:,}",
+                f" ({human(choice.expect_bytes)}) — the cap the runner holds it to",
+                band,
+                width - 3,
+            )
+        _text(win, 6, 2, [(CONFIRM_LABELS[0], "muted")])
+        _text(win, 7, 2, [(CONFIRM_LABELS[1], "muted")])
         if narrow:
             # Only the saved file, and only its name: the queue path is the
             # same information twice and the leading directories are the part
             # nobody needs at 40 columns.
-            _addstr(win, 9, 2, f"→ {slug}.{choice.ext}")
+            _text(win, 9, 2, [("→", "muted"), (f" {slug}.{choice.ext}", "base")], width - 3)
         else:
             # The name it is *written* with, which is what the number on it
             # means. A spot taken renames it a second later — said here rather
             # than left to be noticed, because the receipt names the file.
-            wrote = f"→ queue/{item_name(number, slug)}"
+            wrote = f" queue/{item_name(number, slug)}"
             if spot is not None:
                 wrote += ", renumbered at the spot"
-            _addstr(win, 9, 2, fit(wrote, width - 3))
-            _addstr(win, 10, 2, fit(f"→ {where}/{slug}.{choice.ext}", width - 3))
+            _text(win, 9, 2, [("→", "muted"), (fit(wrote, width - 4), "base")])
+            _text(
+                win,
+                10,
+                2,
+                [("→", "muted"), (fit(f" {where}/{slug}.{choice.ext}", width - 4), "base")],
+            )
         if now:
             # The second of the three places this says paid, and the only one
             # carrying the number. Bold and cost-banded where there is colour;
             # the sentence stands on its own where there is not.
-            _addstr(
+            _text(
                 win,
                 11,
                 2,
-                fit(
-                    f"this spends {human(choice.expect_bytes)} of PAID data", width - 3
-                ),
-                curses.A_BOLD | cost,
+                [(
+                    fit(f"this spends {human(choice.expect_bytes)} of PAID data", width - 3),
+                    BAND_ROLE[band],
+                    True,
+                )],
             )
             note = (
                 "starts on enter and runs in the background; dlq list "
                 "shows it, x stops it"
             )
             for offset, piece in enumerate(wrapped(note, max(20, width - 4))):
-                _addstr(win, 13 + offset, 2, piece, curses.A_DIM)
-        _addstr(
-            win,
-            height - 2,
-            1,
-            confirm_hints(now, width),
-            curses.A_DIM,
-        )
+                _text(win, 13 + offset, 2, [(piece, "muted")])
+        _help(win, height - 2, confirm_hints(now, width), width)
 
         # The editor must not be told it has more room than the window does, or
         # the field it underlines runs off the right of a phone. The same room
         # bounds the priority row, which says a place in words when one is in
         # force and is otherwise the two digits it always was.
         room = max(8, width - gutter - 2)
-        _addstr(
-            win,
-            6,
-            gutter,
-            f"{number:02d}" if spot is None else spot_said(spot, queued, room),
-            curses.A_REVERSE if field == 0 else 0,
-        )
+        # The field being edited is the selection bar, as wide as its value.
+        value = f"{number:02d}" if spot is None else spot_said(spot, queued, room)
+        _text(win, 6, gutter, [(value, "base")], bar=field == 0)
         # Clipped with an ellipsis rather than by the window edge: a long slug
         # cut off at the last column looks like the whole file name, and this
         # is the screen where the file name is being decided.
-        _addstr(
-            win,
-            7,
-            gutter,
-            fit(slug, max(8, width - gutter - 2)),
-            curses.A_REVERSE if field == 1 else 0,
-        )
+        _text(win, 7, gutter, [(fit(slug, max(8, width - gutter - 2)), "base")], bar=field == 1)
         win.refresh()
 
         key = win.getch()
@@ -3124,19 +3508,14 @@ def duplicate_screen(win, paint: dict, dup: Duplicate) -> bool:
         "done": " already downloaded ",
         "failed": " already tried ",
     }
-    _addstr(
-        win,
-        0,
-        0,
-        titles.get(dup.where, " already queued ").ljust(width - 1),
-        curses.A_REVERSE | curses.A_BOLD | paint.get("night", 0),
-    )
+    _header(win, width, [titles.get(dup.where, " already queued ").strip()], tone="night")
     row = 2
     for text in (dup.says(), f"as {dup.stem}"):
         # Through `wrapped`, not textwrap: the second of these is `as
         # 10-crust-of-rust-subtyping`, and the default breaks it at a hyphen.
         for piece in wrapped(text, max(12, width - 4)):
-            _addstr(win, row, 2, piece, curses.A_BOLD if row == 2 else 0)
+            # The verdict in amber, the colour the old banner carried it in.
+            _text(win, row, 2, [(piece, "warning", True) if row == 2 else (piece, "base")])
             row += 1
     row += 1
     if dup.how == "name":
@@ -3147,11 +3526,11 @@ def duplicate_screen(win, paint: dict, dup: Duplicate) -> bool:
             "the same title",
             max(12, width - 4),
         ):
-            _addstr(win, row, 2, piece, curses.A_DIM)
+            _text(win, row, 2, [(piece, "muted")])
             row += 1
         row += 1
-    _addstr(win, min(row, height - 4), 2, "a  queue it again anyway")
-    _addstr(win, height - 2, 1, "a  again   any other key: back", curses.A_DIM)
+    _text(win, min(row, height - 4), 2, [("a", "primary", True), ("  queue it again anyway", "base")])
+    _help(win, height - 2, [("a", "again"), ("any other key:", "back")], width)
     win.refresh()
     return win.getch() == ord("a")
 
@@ -3182,20 +3561,36 @@ def message_body(lines: list[str], width: int, rows: int) -> list[str]:
 
 
 def message(win, lines: list[str]) -> None:
-    """A full-screen notice, wrapped to whatever width there is.
+    """A notice, wrapped to whatever width there is.
 
     Wrapped rather than clipped: these are the sentences that explain why
     nothing was queued, and half of one is no explanation at all.
+
+    With bewitch it is a dialog composed over the screen that raised it —
+    nothing is erased, so what was being looked at stays behind the box —
+    and as wide as the terminal on a phone, so the body wraps to exactly the
+    width it always did (:data:`MESSAGE_MAX` caps it on a desk). The box's
+    border and key row take the four rows the full-screen notice kept for its
+    margin and its key, so the same :func:`message_body` bound keeps the way
+    out on screen. Plain, it is the full-screen notice it always was.
     """
-    win.erase()
     height, columns = win.getmaxyx()
-    width = max(20, columns - 4)
+    if STYLED:
+        box = min(columns, MESSAGE_MAX)
+        width = max(20, box - 4)
+    else:
+        win.erase()
+        width = max(20, columns - 4)
     body = message_body(lines, width, max(1, height - 4))
     # The whole first entry is the verdict, however many lines it wrapped to.
     head = len(wrapped(lines[0], width)) if lines else 0
-    for row, text in enumerate(body, start=1):
-        _addstr(win, row, 2, text, curses.A_BOLD if row <= head else 0)
-    _addstr(win, height - 2, 1, "any key to continue", curses.A_DIM)
+    if STYLED:
+        block = message_box(body, head, box)
+        _draw(win, max(0, (height - block.height) // 2), max(0, (columns - box) // 2), block)
+    else:
+        for row, text in enumerate(body, start=1):
+            _addstr(win, row, 2, text, curses.A_BOLD if row <= head else 0)
+        _addstr(win, height - 2, 1, "any key to continue", curses.A_DIM)
     win.refresh()
     win.getch()
 
@@ -3211,33 +3606,40 @@ def entry(win, paint: dict, initial: str = "") -> str | None:
     win.erase()
     height, width = win.getmaxyx()
     narrow = width < WIDE
-    _addstr(
+    _header(win, width, [])
+    # A row lower under the header than the plain screen has it, so the
+    # prompt sits directly over its field rather than against the band.
+    _text(
         win,
-        1,
+        2 if STYLED else 1,
         2,
-        "search, or paste a URL" if narrow else "search youtube, or paste a URL",
-        curses.A_BOLD | paint.get("head", 0),
+        [("search, or paste a URL" if narrow else "search youtube, or paste a URL",
+          "primary", True)],
+        width - 3,
     )
     # Four answers now, and the last two are written here or they do not
     # exist: `subs` and `wl` are words typed into a field, with nothing on any
     # screen to discover them from. The costs stand under it for the same reason they
     # always did — before anything is spent, rather than in a dialog after.
+    # Each is drawn as the help line draws a key: what is typed a shade
+    # lighter than what it costs.
     if width < 40:
-        _addstr(win, 6, 2, "search ~0.1 MB · a URL ~0.3 MB", curses.A_DIM)
-        _addstr(win, 7, 2, "subs → your feed ~0.2 MB", curses.A_DIM)
-        _addstr(win, 8, 2, "wl → watch later ~0.2 MB", curses.A_DIM)
+        costs = [
+            "search ~0.1 MB · a URL ~0.3 MB",
+            "subs → your feed ~0.2 MB",
+            "wl → watch later ~0.2 MB",
+        ]
     else:
-        _addstr(win, 6, 2, "words → youtube      ~0.1 MB", curses.A_DIM)
-        _addstr(win, 7, 2, "a URL → the formats  ~0.1-0.5 MB", curses.A_DIM)
-        _addstr(win, 8, 2, "subs  → your feed    ~0.2 MB", curses.A_DIM)
-        _addstr(win, 9, 2, "wl    → watch later  ~0.2 MB", curses.A_DIM)
-    _addstr(
-        win,
-        height - 2,
-        1,
-        hint("entry", width) if narrow else "enter go   esc quit",
-        curses.A_DIM,
-    )
+        costs = [
+            "words → youtube      ~0.1 MB",
+            "a URL → the formats  ~0.1-0.5 MB",
+            "subs  → your feed    ~0.2 MB",
+            "wl    → watch later  ~0.2 MB",
+        ]
+    for offset, line in enumerate(costs):
+        said, arrow, rest = line.partition("→")
+        _text(win, 6 + offset, 2, [(said, "muted"), (arrow + rest, "faint")], width - 2)
+    _help(win, height - 2, hint("entry", width) if narrow else "enter go   esc quit", width)
     return text_input(win, 3, 2, initial, max(12, width - 4))
 
 
@@ -3308,15 +3710,7 @@ def results(
         height, width = win.getmaxyx()
         narrow = width < WIDE
         tall = 1 if not narrow else 2
-        _addstr(
-            win,
-            0,
-            0,
-            fit(feed.banner if feed else f" search: {query} ", width - 1).ljust(
-                width - 1
-            ),
-            curses.A_REVERSE | curses.A_BOLD | paint.get("head", 0),
-        )
+        _header(win, width, [feed.banner.strip() if feed else f"search: {query}"])
         if feed:
             # What the deeper look costs stands on the screen before ↓ is
             # pressed, which is the entry screen's rule applied to the one key
@@ -3328,7 +3722,7 @@ def results(
             meta = f"{len(hits)} results  ·  ~ approx dates"
             if not narrow:
                 meta = f"{len(hits)} results  ·  youtube  ·  ~ dates are approximate"
-        _addstr(win, 1, 1, fit(meta, width - 2), curses.A_DIM)
+        _section(win, 1, meta, width)
 
         listed = max(1, (height - 6) // tall)
         cursor, top = viewport(cursor, top, listed, len(hits))
@@ -3339,16 +3733,20 @@ def results(
             index = top + row
             if index >= len(hits):
                 break
-            attr = curses.A_REVERSE if index == cursor else 0
-            for offset, line in enumerate(
-                result_row(
+            # The cursor's result is the selection bar, both of its lines and
+            # as wide as the rows are: one column short of the terminal, and
+            # that column is the scrollbar's.
+            for offset, pieces in enumerate(
+                result_pieces(
                     hits[index], width, index in queued, tick if index == cursor else None
                 )
             ):
-                _addstr(win, 3 + row * tall + offset, 0, line.ljust(width - 1), attr)
+                _text(win, 3 + row * tall + offset, 0, pieces, width - 1, bar=index == cursor)
+        shown = min(listed, len(hits) - top)
+        _scrollbar(win, 3, width - 1, shown * tall, len(hits), listed, top)
 
         if running.alive:
-            _addstr(win, height - 3, 1, running.line(width), curses.A_BOLD)
+            _progress(win, height - 3, 1, running.line(width), width - 2)
         if narrow:
             if feed:
                 # `-end` when there is nothing further back to buy, so the
@@ -3369,7 +3767,7 @@ def results(
             keys += "   q back"
             if running.alive:
                 keys += "   x stop the download"
-        _addstr(win, height - 2, 1, keys, curses.A_DIM)
+        _help(win, height - 2, keys, width)
         win.refresh()
 
         # Blocking unless there is something to redraw for, so an idle screen
@@ -3458,32 +3856,34 @@ def watch(win, paint: dict, running: Running) -> None:
         # `o` only while the bytes move and nobody has said stop: never a key
         # drawn in the hints that does nothing.
         offered = running.askable
-        _addstr(
-            win,
-            0,
-            0,
-            " downloading now — paid ".ljust(width - 1),
-            curses.A_REVERSE | curses.A_BOLD | paint.get("head", 0),
-        )
+        _header(win, width, ["downloading now — paid"])
         if running.alive:
-            _addstr(win, 2, 2, running.line(width), curses.A_BOLD)
+            report = now_progress(running.name)
+            _progress(win, 2, 2, progress_line(running.name, report, width), width - 3)
+            # The bar only once a server has said how big the file is: a
+            # total is never invented, so with none there is no bar to fill.
+            if STYLED and report and report[1]:
+                _draw(win, 4, 2, bubbles.progress_bar(report[0] / report[1], width - 4))
         else:
-            _addstr(
+            _text(
                 win,
                 2,
                 2,
-                "no longer running — dlq list says how it went"
-                if width >= WIDE
-                else "no longer running",
-                curses.A_BOLD,
+                [(
+                    "no longer running — dlq list says how it went"
+                    if width >= WIDE
+                    else "no longer running",
+                    "base",
+                    True,
+                )],
+                width - 3,
             )
         if running.opened or (offered and running.open_when_done):
             said = running.opened or "opens when done"
-            _addstr(win, 3, 2, fit(said, width - 3))
-        _addstr(
+            _text(win, 3, 2, [(fit(said, width - 3), "muted")])
+        _help(
             win,
             height - 2,
-            1,
             hint("watch" if offered else "watch-over", width)
             if width < WIDE
             else (
@@ -3491,7 +3891,7 @@ def watch(win, paint: dict, running: Running) -> None:
                 if offered
                 else "q go back"
             ),
-            curses.A_DIM,
+            width,
         )
         win.refresh()
         win.timeout(500 if running.alive or not running.settled else -1)

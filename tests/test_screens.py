@@ -119,18 +119,21 @@ def test_the_cursor_moves_down_the_listing(tui, make_dump):
     session = tui("--from-json", str(dump))
     session.wait_for(lambda text: "Third One" in text)
 
-    def reversed_rows():
+    def selected_rows():
+        """The rows drawn as the selection: a bar filled with a colour where
+        the terminal has colour, reverse video where it has none."""
         return {
             row for row in range(session.screen.lines)
             for cell in session.screen.buffer[row].values()
-            if cell.reverse and cell.data.strip()
+            if (cell.reverse or cell.bg != "default") and cell.data.strip()
         }
 
     settled(session)
-    first = reversed_rows()
+    first = selected_rows()
+    assert first
     session.send(DOWN)
     settled(session)
-    assert reversed_rows() != first
+    assert selected_rows() != first
 
 
 def test_backing_out_of_the_listing_reaches_the_field(tui, make_dump):
