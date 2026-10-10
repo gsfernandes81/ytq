@@ -4521,7 +4521,8 @@ def main(argv: list[str] | None = None) -> int:
     os.environ.setdefault("ESCDELAY", "25")
     if BEWITCH is None:
         print(
-            "ytq: no bewitch checkout (~/bewitch or $BEWITCH_HOME); "
+            "ytq: no bewitch checkout with bewitch.cursed (~/bewitch or "
+            "$BEWITCH_HOME, on bewitch's bewitched branch); "
             "drawing with plain curses",
             file=sys.stderr,
         )
